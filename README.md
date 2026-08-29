@@ -18,18 +18,18 @@ cargo install --path .       # install `runuz` on PATH
 ## Usage
 
 ```sh
-# Read a file — code files get a tree-sitter symbol outline
+# Read a file: code files get a tree-sitter symbol outline
 runuz read --file-path src/main.rs
 runuz read --file-path src/main.rs --symbol main
 runuz read --file-path src/ --pattern 'TODO'
 
-# Author code — AST-grounded, symbol-scoped
+# Author code: AST-grounded, symbol-scoped
 runuz do_code --file-path src/main.rs --operation create --new-source 'fn main() {}'
 runuz do_code --file-path src/main.rs --operation replace --symbol main --new-source 'fn main() { run(); }'
 runuz do_code --file-path src/main.rs --operation insert_after --symbol main --new-source 'fn helper() {}'
 runuz do_code --file-path src/main.rs --operation delete --symbol helper
 
-# Author non-code — linguistic scope (word/phrase/sentence/paragraph)
+# Author non-code: linguistic scope (word/phrase/sentence/paragraph)
 runuz do_nocode --file-path .env --phrase DATABASE_URL --replace 'postgres://new/db'
 runuz do_nocode --file-path README.md --word runuz --replace runuz2
 
@@ -38,7 +38,7 @@ runuz read --file-path src/main.rs --json
 ```
 
 Every write is re-parsed for syntax errors (code) or re-validated as
-JSON (non-code) before landing — a broken edit is rejected and the
+JSON (non-code) before landing; a broken edit is rejected and the
 original is left untouched.
 
 ## Tool surface
@@ -49,7 +49,7 @@ original is left untouched.
 | `do_code` | AST-grounded code authoring: `create` / `replace` / `insert_before` / `insert_after` / `delete`, symbol-scoped with the synthetic `imports` symbol |
 | `do_nocode` | linguistic-scope edits: `word` / `phrase` / `sentence` / `paragraph`; JSON results re-validated as JSON |
 
-(bash intentionally dropped — not part of the standalone CLI.)
+(bash intentionally dropped; not part of the standalone CLI.)
 
 ## Languages
 
@@ -59,9 +59,9 @@ tree-sitter-backed AST for `rs`, `py`/`pyi`, `go`, `js`/`jsx`/`mjs`/`cjs`,
 
 ## Layout
 
-- `src/lib.rs` — the reusable core (AST + tools) plus a local
+- `src/lib.rs`: the reusable core (AST + tools) plus a local
   `ToolDef`/`ToolResult` contract replicating `nest_common`, so the
   follow-up hive re-integration is drop-in.
-- `src/main.rs` / `src/cli.rs` — the `runuz` binary.
-- `humfs/` — the literal copy of hum's fs forager hive (follow-up:
+- `src/main.rs` / `src/cli.rs`: the `runuz` binary.
+- `humfs/`: the literal copy of hum's fs forager hive (follow-up:
   remote hive over the thrum protocol + humd, shelling out to this CLI).
