@@ -1,5 +1,15 @@
 //! Command-line parsing for the runuz binary — a small hand-rolled
 //! parser (no clap dependency; keeps the standalone crate lean).
+//!
+//! The four linguistic scopes are TOP-LEVEL subcommands:
+//!   runuz word <scope-text> --file-path <path> [--replace <text>]
+//!   runuz phrase <scope-text> ...   sentence ...   paragraph ...
+//! plus `read` for reading/outlining. Scope-as-top-level makes the
+//! four scopes discoverable and impossible to forget.
+//!
+//! The scope text is the FIRST positional argument after the scope
+//! subcommand; `--file-path` is required; `--replace` is optional
+//! (omit to delete the scope).
 
 use anyhow::{bail, Result};
 
@@ -35,10 +45,8 @@ pub struct DoCodeArgs {
 #[derive(Debug)]
 pub struct DoNonCodeArgs {
     pub file_path: String,
-    pub word: Option<String>,
-    pub phrase: Option<String>,
-    pub sentence: Option<String>,
-    pub paragraph: Option<String>,
+    pub scope: String,          // word | phrase | sentence | paragraph
+    pub scope_text: String,     // positional scope parameter value
     pub replace: Option<String>,
 }
 
@@ -61,8 +69,8 @@ impl Args {
         }
         let sub = sub.ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
 
-        // Remaining tokens: `--key value` pairs (with `--json` allowed
-        // anywhere).
+        // Remaining tokens: positional args come first (`rest`), then
+        // `--key value` pairs (with `--json` allowed anywhere).
         let mut pairs: Vec<(String, String)> = Vec::new();
         let mut rest: Vec<String> = Vec::new();
         while let Some(a) = it.next() {
@@ -84,8 +92,9 @@ impl Args {
         let cmd = match sub.as_str() {
             "read" => Command::Read(read_args(&pairs)?),
             "do_code" | "do-code" => Command::DoCode(do_code_args(&pairs)?),
-            "do_nocode" | "do-nocode" => Command::DoNonCode(do_noncode_args(&pairs)?),
-            other => bail!("unknown subcommand {other:?} — use read, do_code, or do_nocode"),
+            "word" | "phrase" | "sentence" | "paragraph" =>
+                Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
+            other => bail!("unknown subcommand {other:?} — use read, do_code, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
     }
@@ -119,24 +128,34 @@ fn do_code_args(pairs: &[(String, String)]) -> Result<DoCodeArgs> {
     })
 }
 
-fn do_noncode_args(pairs: &[(String, String)]) -> Result<DoNonCodeArgs> {
+fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> Result<DoNonCodeArgs> {
     Ok(DoNonCodeArgs {
         file_path: req(pairs, "file-path")?.to_string(),
-        word: opt(pairs, "word"),
-        phrase: opt(pairs, "phrase"),
-        sentence: opt(pairs, "sentence"),
-        paragraph: opt(pairs, "paragraph"),
+        scope: scope.to_string(),
+        scope_text: rest.first().cloned().unwrap_or_default(),
         replace: opt(pairs, "replace"),
     })
 }
 
 fn help() {
-    print!(
-        "runuz — standalone filesystem tool: do_code / do_nocode / do_read\n\n\
-         USAGE:\n\
-         \x20 runuz [--json] read --file-path <path> [--symbol S] [--query Q] [--pattern RE]\n\
-         \x20 runuz [--json] do_code --file-path <path> [--operation op] [--symbol S] [--new-source TEXT]\n\
-         \x20 runuz [--json] do_nocode --file-path <path> [--word W | --phrase P | --sentence S | --paragraph P] [--replace TEXT]\n\n\
-         operations (do_code): create | replace | insert_before | insert_after | delete\n"
-    );
+    println!(r#"runuz — the standalone filesystem CLI
+
+USAGE:
+  runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
+  runuz do_code --file-path <path> [--operation op] [--symbol S] [--new-source T]
+  runuz word <scope-text> --file-path <path> [--replace T]
+  runuz phrase <scope-text> --file-path <path> [--replace T]
+  runuz sentence <scope-text> --file-path <path> [--replace T]
+  runuz paragraph <scope-text> --file-path <path> [--replace T]
+
+The four linguistic scopes are TOP-LEVEL subcommands:
+  word      single-token swap, format-agnostic
+  phrase    structural name (JSON/YAML key, env var, markdown heading,
+            TOML section) OR exact text — in-place, no line munging
+  sentence  smallest independent unit (whole containing line)
+  paragraph full blank-line block
+
+Omit --replace to delete the resolved scope. --json anywhere for
+machine-readable output.
+"#);
 }

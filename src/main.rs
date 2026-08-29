@@ -1,10 +1,16 @@
 //! runuz — the standalone filesystem CLI.
 //!
-//! `do_code`, `do_nocode`, `do_read` for any project on Earth —
-//! AST-grounded via tree-sitter, zero hum dependencies. Each
-//! subcommand maps 1:1 onto the tool body, taking the same args the
-//! humfs tool surface takes, and prints the tool result (output,
-//! plus title/metadata on --json).
+//! `read`, `do_code`, and the four linguistic scopes (`word`, `phrase`,
+//! `sentence`, `paragraph`) for any project on Earth — AST-grounded via
+//! tree-sitter, zero hum dependencies. The four scopes are top-level
+//! subcommands so they're discoverable and hard to forget.
+//!
+//!   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
+//!   runuz do_code --file-path <path> [--operation op] [--symbol S] [--new-source T]
+//!   runuz word <scope> --file-path <path> [--replace T]
+//!   runuz phrase <scope> --file-path <path> [--replace T]
+//!   runuz sentence <scope> --file-path <path> [--replace T]
+//!   runuz paragraph <scope> --file-path <path> [--replace T]
 
 use std::process::ExitCode;
 
@@ -43,20 +49,18 @@ async fn run() -> Result<ExitCode> {
             print_result(&res, json);
         }
         cli::Command::DoNonCode(c) => {
+            // The scope subcommand IS the scope parameter: map
+            // `word|phrase|sentence|paragraph` onto the tool's scope key.
             let mut args = serde_json::json!({
                 "file_path": c.file_path,
             });
-            // serde_json::json! can't take optionals cleanly; build by hand.
-            if let Some(v) = c.word { args["word"] = serde_json::json!(v); }
-            if let Some(v) = c.phrase { args["phrase"] = serde_json::json!(v); }
-            if let Some(v) = c.sentence { args["sentence"] = serde_json::json!(v); }
-            if let Some(v) = c.paragraph { args["paragraph"] = serde_json::json!(v); }
+            args[c.scope.clone()] = serde_json::json!(c.scope_text);
             if let Some(v) = c.replace { args["replace"] = serde_json::json!(v); }
             let res = runuz::tools::do_noncode(args).await;
             print_result(&res, json);
         }
     }
-    Ok(if json { ExitCode::SUCCESS } else { ExitCode::SUCCESS })
+    Ok(ExitCode::SUCCESS)
 }
 
 fn print_result(res: &ToolResult, json: bool) {

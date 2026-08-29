@@ -20,7 +20,7 @@ cargo install --path .       # install `runuz` on PATH
 ## Usage
 
 ```sh
-# Read a file: code files get a tree-sitter symbol outline
+# Read a file: code files get a symbol outline
 runuz read --file-path src/main.rs
 runuz read --file-path src/main.rs --symbol main
 runuz read --file-path src/ --pattern 'TODO'
