@@ -1,15 +1,16 @@
 //! Command-line parsing for the runuz binary — a small hand-rolled
 //! parser (no clap dependency; keeps the standalone crate lean).
 //!
-//! The four linguistic scopes are TOP-LEVEL subcommands:
-//!   runuz word <scope-text> --file-path <path> [--replace <text>]
-//!   runuz phrase <scope-text> ...   sentence ...   paragraph ...
-//! plus `read` for reading/outlining. Scope-as-top-level makes the
-//! four scopes discoverable and impossible to forget.
+//! The tool *operations* are TOP-LEVEL subcommands so they're
+//! discoverable and impossible to forget:
 //!
-//! The scope text is the FIRST positional argument after the scope
-//! subcommand; `--file-path` is required; `--replace` is optional
-//! (omit to delete the scope).
+//!   code ops:  runuz create | replace | insert_before | insert_after | delete
+//!   text scopes: runuz word | phrase | sentence | paragraph
+//!   reading:  runuz read
+//!
+//! Each op takes its target as the FIRST positional arg after the
+//! subcommand (where applicable), then `--file-path` (required) and
+//! op-specific flags.
 
 use anyhow::{bail, Result};
 
@@ -22,7 +23,10 @@ pub struct Args {
 #[derive(Debug)]
 pub enum Command {
     Read(ReadArgs),
-    DoCode(DoCodeArgs),
+    Create(CreateArgs),
+    Replace(ReplaceArgs),
+    Insert(InsertArgs),
+    Delete(DeleteArgs),
     DoNonCode(DoNonCodeArgs),
 }
 
@@ -35,11 +39,30 @@ pub struct ReadArgs {
 }
 
 #[derive(Debug)]
-pub struct DoCodeArgs {
+pub struct CreateArgs {
     pub file_path: String,
-    pub operation: String,
-    pub symbol: Option<String>,
     pub new_source: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ReplaceArgs {
+    pub file_path: String,
+    pub symbol: Option<String>,     // None => whole-file rewrite
+    pub new_source: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct InsertArgs {
+    pub file_path: String,
+    pub anchor: String,             // before | after
+    pub symbol: String,             // the anchor symbol
+    pub new_source: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DeleteArgs {
+    pub file_path: String,
+    pub symbol: String,
 }
 
 #[derive(Debug)]
@@ -69,8 +92,6 @@ impl Args {
         }
         let sub = sub.ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
 
-        // Remaining tokens: positional args come first (`rest`), then
-        // `--key value` pairs (with `--json` allowed anywhere).
         let mut pairs: Vec<(String, String)> = Vec::new();
         let mut rest: Vec<String> = Vec::new();
         while let Some(a) = it.next() {
@@ -91,10 +112,14 @@ impl Args {
 
         let cmd = match sub.as_str() {
             "read" => Command::Read(read_args(&pairs)?),
-            "do_code" | "do-code" => Command::DoCode(do_code_args(&pairs)?),
+            "create" => Command::Create(create_args(&pairs)?),
+            "replace" => Command::Replace(replace_args(&pairs)?),
+            "insert_before" => Command::Insert(insert_args(&pairs, "before")?),
+            "insert_after"  => Command::Insert(insert_args(&pairs, "after")?),
+            "delete" => Command::Delete(delete_args(&pairs)?),
             "word" | "phrase" | "sentence" | "paragraph" =>
                 Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
-            other => bail!("unknown subcommand {other:?} — use read, do_code, word, phrase, sentence, or paragraph"),
+            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
     }
@@ -119,12 +144,34 @@ fn read_args(pairs: &[(String, String)]) -> Result<ReadArgs> {
     })
 }
 
-fn do_code_args(pairs: &[(String, String)]) -> Result<DoCodeArgs> {
-    Ok(DoCodeArgs {
+fn create_args(pairs: &[(String, String)]) -> Result<CreateArgs> {
+    Ok(CreateArgs {
         file_path: req(pairs, "file-path")?.to_string(),
-        operation: opt(pairs, "operation").unwrap_or_else(|| "replace".into()),
+        new_source: opt(pairs, "new-source"),
+    })
+}
+
+fn replace_args(pairs: &[(String, String)]) -> Result<ReplaceArgs> {
+    Ok(ReplaceArgs {
+        file_path: req(pairs, "file-path")?.to_string(),
         symbol: opt(pairs, "symbol"),
         new_source: opt(pairs, "new-source"),
+    })
+}
+
+fn insert_args(pairs: &[(String, String)], anchor: &str) -> Result<InsertArgs> {
+    Ok(InsertArgs {
+        file_path: req(pairs, "file-path")?.to_string(),
+        anchor: anchor.to_string(),
+        symbol: req(pairs, "symbol")?.to_string(),
+        new_source: opt(pairs, "new-source"),
+    })
+}
+
+fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
+    Ok(DeleteArgs {
+        file_path: req(pairs, "file-path")?.to_string(),
+        symbol: req(pairs, "symbol")?.to_string(),
     })
 }
 
@@ -142,20 +189,26 @@ fn help() {
 
 USAGE:
   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
-  runuz do_code --file-path <path> [--operation op] [--symbol S] [--new-source T]
+  runuz create  --file-path <path> [--new-source T]
+  runuz replace --file-path <path> [--symbol S] [--new-source T]
+  runuz insert_before --file-path <path> --symbol S [--new-source T]
+  runuz insert_after  --file-path <path> --symbol S [--new-source T]
+  runuz delete --file-path <path> --symbol S
   runuz word <scope-text> --file-path <path> [--replace T]
   runuz phrase <scope-text> --file-path <path> [--replace T]
   runuz sentence <scope-text> --file-path <path> [--replace T]
   runuz paragraph <scope-text> --file-path <path> [--replace T]
 
-The four linguistic scopes are TOP-LEVEL subcommands:
-  word      single-token swap, format-agnostic
-  phrase    structural name (JSON/YAML key, env var, markdown heading,
-            TOML section) OR exact text — in-place, no line munging
-  sentence  smallest independent unit (whole containing line)
-  paragraph full blank-line block
+All tool OPERATIONS are TOP-LEVEL subcommands:
+  create        new file (fails if it exists)
+  replace       symbol-scoped, or whole-file when --symbol omitted
+  insert_before / insert_after   splice new_source at the anchor symbol
+  delete        drop the anchor symbol's byte range
+  word / phrase / sentence / paragraph   linguistic scopes (omit
+                --replace to delete the resolved scope)
 
-Omit --replace to delete the resolved scope. --json anywhere for
+--symbol accepts dot-nested (e.g. 'Class.method'); 'imports' addresses
+the synthetic top-of-file import block. --json anywhere for
 machine-readable output.
 "#);
 }
