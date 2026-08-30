@@ -19,21 +19,25 @@ cargo install --path .       # install `runuz` on PATH
 
 ## Usage
 
+All tool operations are TOP-LEVEL subcommands, so they're discoverable
+and hard to forget:
+
 ```sh
 # Read a file: code files get a symbol outline
 runuz read --file-path src/main.rs
 runuz read --file-path src/main.rs --symbol main
 runuz read --file-path src/ --pattern 'TODO'
 
-# Author code: AST-grounded, symbol-scoped
-runuz do_code --file-path src/main.rs --operation create --new-source 'fn main() {}'
-runuz do_code --file-path src/main.rs --operation replace --symbol main --new-source 'fn main() { run(); }'
-runuz do_code --file-path src/main.rs --operation insert_after --symbol main --new-source 'fn helper() {}'
-runuz do_code --file-path src/main.rs --operation delete --symbol helper
+# Author code: AST-grounded, symbol-scoped (top-level ops)
+runuz create  --file-path src/main.rs --new-source 'fn main() {}'
+runuz replace --file-path src/main.rs --symbol main --new-source 'fn main() { run(); }'
+runuz insert_before --file-path src/main.rs --symbol main --new-source 'fn helper() {}'
+runuz insert_after  --file-path src/main.rs --symbol main --new-source 'fn helper() {}'
+runuz delete --file-path src/main.rs --symbol helper
 
-# Author non-code: linguistic scope (word/phrase/sentence/paragraph)
-runuz do_nocode --file-path .env --phrase DATABASE_URL --replace 'postgres://new/db'
-runuz do_nocode --file-path README.md --word runuz --replace runuz2
+# Author non-code: linguistic scopes are top-level subcommands
+runuz phrase --file-path .env DATABASE_URL --replace 'postgres://new/db'
+runuz word  --file-path README.md runuz --replace runuz2
 
 # Machine-readable output
 runuz read --file-path src/main.rs --json
@@ -48,8 +52,8 @@ original is left untouched.
 | subcommand | what it does |
 |---|---|
 | `read` | filesystem analysis: file / directory / glob; symbol outline for code, anchor outline for configs/docs; `--symbol` (exact), `--query` (fuzzy name), `--pattern` (regex content) |
-| `do_code` | AST-grounded code authoring: `create` / `replace` / `insert_before` / `insert_after` / `delete`, symbol-scoped with the synthetic `imports` symbol |
-| `do_nocode` | linguistic-scope edits: `word` / `phrase` / `sentence` / `paragraph`; JSON results re-validated as JSON |
+| `create` / `replace` / `insert_before` / `insert_after` / `delete` | AST-grounded code authoring, symbol-scoped with the synthetic `imports` symbol |
+| `word` / `phrase` / `sentence` / `paragraph` | linguistic-scope non-code edits; JSON results re-validated as JSON |
 
 (bash intentionally dropped; not part of the standalone CLI.)
 
@@ -65,5 +69,9 @@ tree-sitter-backed AST for `rs`, `py`/`pyi`, `go`, `js`/`jsx`/`mjs`/`cjs`,
   `ToolDef`/`ToolResult` contract replicating `nest_common`, so the
   follow-up hive re-integration is drop-in.
 - `src/main.rs` / `src/cli.rs`: the `runuz` binary.
-- `humfs/`: the literal copy of hum's fs forager hive (follow-up:
-  remote hive over the thrum protocol + humd, shelling out to this CLI).
+- `humfs/`: the **runuz remote hive** — a standalone forager over the
+  thrum protocol + humd. Advertises `humfs_read` / `humfs_do_code` /
+  `humfs_do_noncode`, routes `chi:"tool-call"` tones from humd, and
+  shells out to this `runuz` CLI for file ops (no in-process fs work).
+  Vendored wire machinery under `humfs/src/wire/` (Hid, bee identity,
+  serve_forager, XDG paths) — zero hum internals.
