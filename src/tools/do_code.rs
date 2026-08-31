@@ -55,7 +55,7 @@ pub(crate) fn def() -> ToolDef {
                 "file_path":  { "type": "string", "description": "Absolute path to the code file. Must have a code extension." },
                 "operation":  { "type": "string", "description": "One of: create, replace, insert_before, insert_after, delete. Default: replace." },
                 "symbol":     { "type": "string", "description": "Target symbol name. Required for replace (unless whole-file rewrite), insert_before, insert_after, delete. Dot-separated for nested (e.g. 'Class.method'). Use 'imports' for the synthetic import-block symbol." },
-                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names to replace/delete as ONE contiguous run, resolved against the same file and spliced in a single write. E.g. 'Hid,HidPrefix,HidParseError'. Alternative to 'symbol' for contiguous multi-item blocks." },
+                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names to replace/delete in one atomic write — contiguous OR non-contiguous (each symbol's own range is spliced). Resolved against the same file; any missing name aborts with no partial edit. E.g. 'Hid,HidPrefix,HidParseError'. Alternative to 'symbol' for multi-item blocks." },
                 "new_source": { "type": "string", "description": "The new source code. Required for create, replace, insert_before, insert_after." },
             },
             "required": ["file_path"],
@@ -206,10 +206,10 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let (start, end) = if let Some(list) = symbols {
+    let updated = if let Some(list) = symbols {
         match delete_multi_span(&original, lang, &list) {
             Err(e) => return ToolResult::error(format!("{e}")),
-            Ok(se) => se,
+            Ok(u) => u,
         }
     } else {
         let sym_name = match symbol {
@@ -223,12 +223,9 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
         // Drop the symbol's range PLUS the leading whitespace on its
         // own line, so we don't leave a half-line behind.
         let start = line_start_if_indented_alone(&original, sym.start_byte);
-        let mut end = sym.end_byte;
-        // Eat one trailing newline so successive symbols stay aligned.
-        if original.get(end..end + 1) == Some("\n") { end += 1; }
-        (start, end)
+        let end = maybe_eat_blank_line(&original, sym.end_byte);
+        splice(&original, start, end, "")
     };
-    let updated = splice(&original, start, end, "");
 
     if let Err(msg) = ast::validate_syntax(&updated, lang) {
         return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
@@ -281,24 +278,51 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
     Ok(out)
 }
 
-/// `replace` across a contiguous run of symbols: one combined splice
-/// from the first symbol's start to the last symbol's end, one write.
+/// `replace` across several symbols — contiguous or not. Each symbol's
+/// own byte range is replaced with `new_source` (multi-site splice),
+/// resolved against the same source, applied in one pass, one write.
+/// Overlapping/adjacent ranges coalesce into one combined span, so a
+/// contiguous run still yields a single replacement.
 fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> Result<String, String> {
     let syms = resolve_multi(source, lang, list)?;
-    let start = syms[0].start_byte;
-    let end = syms[syms.len() - 1].end_byte;
-    Ok(splice(source, start, end, new_source))
+    let mut ranges: Vec<(usize, usize)> =
+        syms.iter().map(|s| (s.start_byte, s.end_byte)).collect();
+    ranges.sort_by_key(|r| r.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (s, e) in ranges {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 { last.1 = last.1.max(e); continue; }
+        }
+        merged.push((s, e));
+    }
+    let mut out = source.to_string();
+    for &(s, e) in merged.iter().rev() { out = splice(&out, s, e, new_source); }
+    Ok(out)
 }
 
-/// `delete` across a contiguous run of symbols: one span from the
-/// first symbol's line-start to the last symbol's end (+1 newline).
-/// Returns (start, end) so the caller writes once and validates once.
-fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<(usize, usize), String> {
+/// `delete` across several symbols — contiguous or not. Each symbol's
+/// own line-range is dropped (multi-site splice), resolved against the
+/// same source, one pass, one write. Overlapping/adjacent ranges
+/// coalesce into one combined span. A trailing newline is only eaten
+/// when the line it leaves behind is surely blank.
+fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<String, String> {
     let syms = resolve_multi(source, lang, list)?;
-    let start = line_start_if_indented_alone(source, syms[0].start_byte);
-    let mut end = syms[syms.len() - 1].end_byte;
-    if source.get(end..end + 1) == Some("\n") { end += 1; }
-    Ok((start, end))
+    let mut ranges: Vec<(usize, usize)> = syms.iter().map(|s| {
+        let start = line_start_if_indented_alone(source, s.start_byte);
+        let end = maybe_eat_blank_line(source, s.end_byte);
+        (start, end)
+    }).collect();
+    ranges.sort_by_key(|r| r.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (s, e) in ranges {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 { last.1 = last.1.max(e); continue; }
+        }
+        merged.push((s, e));
+    }
+    let mut out = source.to_string();
+    for &(s, e) in merged.iter().rev() { out = splice(&out, s, e, ""); }
+    Ok(out)
 }
 
 /// Synthetic `imports` symbol: the leading contiguous run of
@@ -372,6 +396,37 @@ fn line_start_if_indented_alone(source: &str, index: usize) -> usize {
         if ch != " " && ch != "\t" { return index; }
     }
     i
+}
+
+/// After deleting a symbol's line-range, extend the splice past its
+/// trailing newline(s) ONLY when the lines being eaten are surely blank.
+/// Rule: if the rest of the symbol's own line after `end_byte` holds any
+/// content (the symbol shared its line with a neighbour), never eat —
+/// we must not merge that neighbour up onto the deleted line. Otherwise
+/// the symbol's own line is blank after it, so we eat its newline plus
+/// any following blank (whitespace-only) lines, stopping before the
+/// first line that has content.
+fn maybe_eat_blank_line(source: &str, end: usize) -> usize {
+    let mut j = end;
+    while j < source.len() && &source[j..j + 1] != "\n" {
+        let ch = &source[j..j + 1];
+        if ch != " " && ch != "\t" { return end; } // shared line — never eat
+        j += 1;
+    }
+    if source.get(end..end + 1) != Some("\n") {
+        return end;
+    }
+    let mut i = end + 1;
+    loop {
+        let mut k = i;
+        while k < source.len() && &source[k..k + 1] != "\n" {
+            let ch = &source[k..k + 1];
+            if ch != " " && ch != "\t" { return i; } // content line — stop before it
+            k += 1;
+        }
+        if k >= source.len() { return i; }
+        i = k + 1;
+    }
 }
 
 fn ok(msg: String, path: &Path) -> ToolResult {
@@ -606,6 +661,81 @@ mod tests {
         assert!(updated.contains("HashMap"));
         assert!(!updated.contains("std::fs"));
         assert!(updated.contains("fn alpha"));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_multi_non_contiguous_sites() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() {}\nfn beta() {}\nfn gamma() {}\nfn delta() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbols": "alpha,gamma",
+        })).await;
+        assert!(!res.is_error, "non-contiguous delete failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(!updated.contains("fn alpha"), "alpha left: {updated}");
+        assert!(updated.contains("fn beta"), "lost beta: {updated}");
+        assert!(!updated.contains("fn gamma"), "gamma left: {updated}");
+        assert!(updated.contains("fn delta"), "lost delta: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn replace_multi_non_contiguous_sites() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() -> u32 { 1 }\nfn beta() -> u32 { 2 }\nfn gamma() -> u32 { 3 }\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbols": "alpha,gamma",
+            "new_source": "fn x() {}",
+        })).await;
+        assert!(!res.is_error, "non-contiguous replace failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(updated.contains("fn x"), "no x: {updated}");
+        assert!(!updated.contains("fn alpha"), "alpha left: {updated}");
+        assert!(updated.contains("fn beta"), "lost beta: {updated}");
+        assert!(!updated.contains("fn gamma"), "gamma left: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_does_not_eat_shared_line() {
+        let p = tmp("rs");
+        // alpha and beta share one line: `fn alpha() {} fn beta() {}`
+        fs::write(&p, "fn alpha() {} fn beta() {}\nfn gamma() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbol": "alpha",
+        })).await;
+        assert!(!res.is_error, "delete failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        // beta must survive on its own line — the newline after alpha's
+        // end_byte is NOT blank (beta follows), so it must not be eaten.
+        assert!(updated.contains("fn beta"), "beta lost: {updated}");
+        assert!(updated.contains("fn gamma"), "gamma lost: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_eats_surely_blank_line() {
+        let p = tmp("rs");
+        // alpha alone on its line, followed by a blank line then beta.
+        fs::write(&p, "fn alpha() {}\n\nfn beta() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbol": "alpha",
+        })).await;
+        assert!(!res.is_error, "delete failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        // the blank line between alpha and beta should be eaten too,
+        // leaving beta at the top with no dangling blank line.
+        assert!(!updated.starts_with("\n"), "dangling blank line: {updated:?}");
+        assert!(updated.contains("fn beta"), "beta lost: {updated}");
         let _ = fs::remove_file(&p);
     }
 }
