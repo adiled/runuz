@@ -79,6 +79,25 @@ async fn run() -> Result<ExitCode> {
             })).await;
             print_result(&res, json);
         }
+        cli::Command::Write(c) => {
+            // Whole-file write, auto-routed by extension:
+            //   code file   -> do_code replace (no symbol => whole-file)
+            //   non-code    -> do_nocode with no scope => write_whole_file
+            let is_code = runuz::ast::is_code_file(std::path::Path::new(&c.file_path));
+            let res = if is_code {
+                runuz::tools::do_code(serde_json::json!({
+                    "file_path": c.file_path,
+                    "operation": "replace",
+                    "new_source": c.content,
+                })).await
+            } else {
+                runuz::tools::do_noncode(serde_json::json!({
+                    "file_path": c.file_path,
+                    "replace": c.content,
+                })).await
+            };
+            print_result(&res, json);
+        }
         cli::Command::DoNonCode(c) => {
             // The scope subcommand IS the scope parameter: map
             // `word|phrase|sentence|paragraph` onto the tool's scope key.

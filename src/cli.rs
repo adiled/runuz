@@ -27,6 +27,7 @@ pub enum Command {
     Replace(ReplaceArgs),
     Insert(InsertArgs),
     Delete(DeleteArgs),
+    Write(WriteArgs),
     DoNonCode(DoNonCodeArgs),
 }
 
@@ -63,6 +64,12 @@ pub struct InsertArgs {
 pub struct DeleteArgs {
     pub file_path: String,
     pub symbol: String,
+}
+
+#[derive(Debug)]
+pub struct WriteArgs {
+    pub file_path: String,
+    pub content: String,
 }
 
 #[derive(Debug)]
@@ -117,9 +124,10 @@ impl Args {
             "insert_before" => Command::Insert(insert_args(&pairs, "before")?),
             "insert_after"  => Command::Insert(insert_args(&pairs, "after")?),
             "delete" => Command::Delete(delete_args(&pairs)?),
+            "write" => Command::Write(write_args(&pairs)?),
             "word" | "phrase" | "sentence" | "paragraph" =>
                 Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
-            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, word, phrase, sentence, or paragraph"),
+            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, write, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
     }
@@ -175,6 +183,13 @@ fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
     })
 }
 
+fn write_args(pairs: &[(String, String)]) -> Result<WriteArgs> {
+    Ok(WriteArgs {
+        file_path: req(pairs, "file-path")?.to_string(),
+        content: req(pairs, "content")?.to_string(),
+    })
+}
+
 fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> Result<DoNonCodeArgs> {
     Ok(DoNonCodeArgs {
         file_path: req(pairs, "file-path")?.to_string(),
@@ -194,6 +209,8 @@ USAGE:
   runuz insert_before --file-path <path> --symbol S [--new-source T]
   runuz insert_after  --file-path <path> --symbol S [--new-source T]
   runuz delete --file-path <path> --symbol S
+  runuz write --file-path <path> --content T      (whole-file write;
+                routes code files to do_code, non-code to do_nocode)
   runuz word <scope-text> --file-path <path> [--replace T]
   runuz phrase <scope-text> --file-path <path> [--replace T]
   runuz sentence <scope-text> --file-path <path> [--replace T]
@@ -204,6 +221,7 @@ All tool OPERATIONS are TOP-LEVEL subcommands:
   replace       symbol-scoped, or whole-file when --symbol omitted
   insert_before / insert_after   splice new_source at the anchor symbol
   delete        drop the anchor symbol's byte range
+  write         whole-file create/overwrite, auto-routed by extension
   word / phrase / sentence / paragraph   linguistic scopes (omit
                 --replace to delete the resolved scope)
 

@@ -25,7 +25,12 @@ pub(crate) use symbol::{Symbol, SymbolKind};
 
 /// Recognize a code language from a file path. Returns None for
 /// unsupported extensions; caller falls back to the text path.
-pub(crate) fn detect_language(path: &Path) -> Option<LangSpec> {
+/// Public convenience: is `path` a recognized code file?
+pub fn is_code_file(path: &Path) -> bool {
+    detect_language(path).is_some()
+}
+
+pub fn detect_language(path: &Path) -> Option<LangSpec> {
     let ext = path.extension().and_then(|s| s.to_str())?.to_ascii_lowercase();
     match ext.as_str() {
         "rs" => Some(LangSpec::Rust),

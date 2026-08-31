@@ -388,7 +388,15 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
     for path in targets {
         let lang = match ast::detect_language(path) { Some(l) => l, None => continue };
         let content = match fs::read_to_string(path) { Ok(s) => s, Err(_) => continue };
-        if let Some((start, end, start_row, end_row)) = ast::resolve_path(&content, lang, symbol) {
+        // Route the synthetic `imports` symbol through the same
+        // machinery do_code uses, so `read --symbol imports` works
+        // the same way as the write ops.
+        let span = if symbol == "imports" {
+            crate::tools::do_code::imports_symbol(&content, lang)
+        } else {
+            ast::resolve_path(&content, lang, symbol)
+        };
+        if let Some((start, end, start_row, end_row)) = span {
             matches += 1;
             out.push_str(&format!("=== {} — '{symbol}' (L{start_row}-L{end_row}) ===\n",
                 path.display()));

@@ -243,6 +243,12 @@ fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Option<Symbol> {
 /// import/use/require/include declarations at top level. Walks
 /// the tree-sitter tree's first-level children and groups
 /// neighbour import nodes into one byte range.
+/// crate-visible alias so `read` can resolve the synthetic
+/// `imports` symbol exactly like the write ops do.
+pub(crate) fn imports_symbol(source: &str, lang: LangSpec) -> Option<(usize, usize, usize, usize)> {
+    synthesize_imports(source, lang).map(|s| (s.start_byte, s.end_byte, s.start_row, s.end_row))
+}
+
 fn synthesize_imports(source: &str, lang: LangSpec) -> Option<Symbol> {
     let tree = ast::parse(source, lang)?;
     let root = tree.root_node();
