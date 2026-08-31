@@ -58,6 +58,7 @@ async fn run() -> Result<ExitCode> {
                 "file_path": c.file_path,
                 "operation": "replace",
                 "symbol": c.symbol,
+                "symbols": c.symbols,
                 "new_source": c.new_source,
             })).await;
             print_result(&res, json);
@@ -76,6 +77,7 @@ async fn run() -> Result<ExitCode> {
                 "file_path": c.file_path,
                 "operation": "delete",
                 "symbol": c.symbol,
+                "symbols": c.symbols,
             })).await;
             print_result(&res, json);
         }

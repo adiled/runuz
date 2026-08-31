@@ -37,6 +37,8 @@ struct Args {
     #[serde(default)]
     symbol: Option<String>,
     #[serde(default)]
+    symbols: Option<String>,
+    #[serde(default)]
     new_source: Option<String>,
 }
 
@@ -46,13 +48,14 @@ fn default_op() -> String { "replace".into() }
 pub(crate) fn def() -> ToolDef {
     ToolDef {
         name: "humfs_do_code".into(),
-        description: "Author code — AST-grounded, symbol-scoped. Operations: create | replace (symbol OR whole-file) | insert_before | insert_after | delete. The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N (P6). Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs (AST-backed today). Every write is re-parsed; a syntax-error result aborts the write. Non-code files route to humfs_do_noncode.".into(),
+        description: "Author code — AST-grounded, symbol-scoped. Operations: create | replace (symbol OR whole-file OR symbols-list) | insert_before | insert_after | delete. The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N (P6). Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs (AST-backed today). Every write is re-parsed; a syntax-error result aborts the write. Non-code files route to humfs_do_noncode.".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "file_path":  { "type": "string", "description": "Absolute path to the code file. Must have a code extension." },
                 "operation":  { "type": "string", "description": "One of: create, replace, insert_before, insert_after, delete. Default: replace." },
                 "symbol":     { "type": "string", "description": "Target symbol name. Required for replace (unless whole-file rewrite), insert_before, insert_after, delete. Dot-separated for nested (e.g. 'Class.method'). Use 'imports' for the synthetic import-block symbol." },
+                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names to replace/delete as ONE contiguous run, resolved against the same file and spliced in a single write. E.g. 'Hid,HidPrefix,HidParseError'. Alternative to 'symbol' for contiguous multi-item blocks." },
                 "new_source": { "type": "string", "description": "The new source code. Required for create, replace, insert_before, insert_after." },
             },
             "required": ["file_path"],
@@ -76,10 +79,10 @@ pub async fn run(args: Value) -> ToolResult {
 
     match args.operation.as_str() {
         "create" => op_create(&path, lang, args.new_source.as_deref()),
-        "replace" => op_replace(&path, lang, args.symbol.as_deref(), args.new_source.as_deref()),
+        "replace" => op_replace(&path, lang, args.symbol.as_deref(), args.symbols.as_deref(), args.new_source.as_deref()),
         "insert_before" => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::Before),
         "insert_after"  => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::After),
-        "delete" => op_delete(&path, lang, args.symbol.as_deref()),
+        "delete" => op_delete(&path, lang, args.symbol.as_deref(), args.symbols.as_deref()),
         other => ToolResult::error(format!(
             "unknown operation '{other}' — pick one of: create, replace, insert_before, insert_after, delete"
         )),
@@ -116,7 +119,7 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
 }
 
 fn op_replace(
-    path: &Path, lang: LangSpec, symbol: Option<&str>, new_source: Option<&str>,
+    path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<&str>, new_source: Option<&str>,
 ) -> ToolResult {
     let new = match new_source {
         Some(s) => s.to_string(),
@@ -127,12 +130,19 @@ fn op_replace(
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
 
-    let updated = match symbol {
-        None => new.clone(),
-        Some(sym_name) => match locate_symbol(&original, lang, sym_name) {
-            None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
-            Some(sym) => splice(&original, sym.start_byte, sym.end_byte, &new),
-        },
+    let updated = if let Some(list) = symbols {
+        match replace_multi(&original, lang, &list, &new) {
+            Err(e) => return ToolResult::error(format!("{e}")),
+            Ok(u) => u,
+        }
+    } else {
+        match symbol {
+            None => new.clone(),
+            Some(sym_name) => match locate_symbol(&original, lang, sym_name) {
+                None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
+                Some(sym) => splice(&original, sym.start_byte, sym.end_byte, &new),
+            },
+        }
     };
 
     if let Err(msg) = ast::validate_syntax(&updated, lang) {
@@ -191,25 +201,33 @@ fn op_insert(
     )
 }
 
-fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>) -> ToolResult {
-    let sym_name = match symbol {
-        Some(s) => s,
-        None => return ToolResult::error("delete needs symbol"),
-    };
+fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<&str>) -> ToolResult {
     let original = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let sym = match locate_symbol(&original, lang, sym_name) {
-        Some(s) => s,
-        None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
+    let (start, end) = if let Some(list) = symbols {
+        match delete_multi_span(&original, lang, &list) {
+            Err(e) => return ToolResult::error(format!("{e}")),
+            Ok(se) => se,
+        }
+    } else {
+        let sym_name = match symbol {
+            Some(s) => s,
+            None => return ToolResult::error("delete needs symbol (or --symbols A,B)"),
+        };
+        let sym = match locate_symbol(&original, lang, sym_name) {
+            Some(s) => s,
+            None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
+        };
+        // Drop the symbol's range PLUS the leading whitespace on its
+        // own line, so we don't leave a half-line behind.
+        let start = line_start_if_indented_alone(&original, sym.start_byte);
+        let mut end = sym.end_byte;
+        // Eat one trailing newline so successive symbols stay aligned.
+        if original.get(end..end + 1) == Some("\n") { end += 1; }
+        (start, end)
     };
-    // Drop the symbol's range PLUS the leading whitespace on its
-    // own line, so we don't leave a half-line behind.
-    let start = line_start_if_indented_alone(&original, sym.start_byte);
-    let mut end = sym.end_byte;
-    // Eat one trailing newline so successive symbols stay aligned.
-    if original.get(end..end + 1) == Some("\n") { end += 1; }
     let updated = splice(&original, start, end, "");
 
     if let Err(msg) = ast::validate_syntax(&updated, lang) {
@@ -218,7 +236,12 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>) -> ToolResult {
     if let Err(e) = std::fs::write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
-    ok(format!("Deleted symbol '{sym_name}' from {}", path.display()), path)
+    let what = match (&symbols, &symbol) {
+        (Some(list), _) => format!("symbols '{}'", list),
+        (None, Some(n)) => format!("symbol '{n}'"),
+        (None, None) => "symbol".into(),
+    };
+    ok(format!("Deleted {what} from {}", path.display()), path)
 }
 
 // ── symbol resolution ───────────────────────────────────────────────────
@@ -237,6 +260,45 @@ fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Option<Symbol> {
         kind: SymbolKind::Other,
         start_byte, end_byte, start_row, end_row,
     })
+}
+
+/// Resolve several named symbols against the SAME `source` (so no
+/// byte drift), and return them ordered by start_byte. Any missing
+/// name is an error (no partial resolution).
+fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>, String> {
+    let mut out = Vec::new();
+    for name in list.split(',') {
+        let name = name.trim();
+        if name.is_empty() { continue; }
+        let sym = match locate_symbol(source, lang, name) {
+            Some(s) => s,
+            None => return Err(format!("symbol '{name}' not found — no partial edit applied")),
+        };
+        out.push(sym);
+    }
+    if out.is_empty() { return Err("symbols list is empty — nothing to edit".into()); }
+    out.sort_by_key(|s| s.start_byte);
+    Ok(out)
+}
+
+/// `replace` across a contiguous run of symbols: one combined splice
+/// from the first symbol's start to the last symbol's end, one write.
+fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> Result<String, String> {
+    let syms = resolve_multi(source, lang, list)?;
+    let start = syms[0].start_byte;
+    let end = syms[syms.len() - 1].end_byte;
+    Ok(splice(source, start, end, new_source))
+}
+
+/// `delete` across a contiguous run of symbols: one span from the
+/// first symbol's line-start to the last symbol's end (+1 newline).
+/// Returns (start, end) so the caller writes once and validates once.
+fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<(usize, usize), String> {
+    let syms = resolve_multi(source, lang, list)?;
+    let start = line_start_if_indented_alone(source, syms[0].start_byte);
+    let mut end = syms[syms.len() - 1].end_byte;
+    if source.get(end..end + 1) == Some("\n") { end += 1; }
+    Ok((start, end))
 }
 
 /// Synthetic `imports` symbol: the leading contiguous run of
@@ -423,6 +485,57 @@ mod tests {
         let updated = fs::read_to_string(&p).unwrap();
         assert!(!updated.contains("fn alpha"));
         assert!(updated.contains("fn beta"));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_multi_symbols_contiguous_run() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() {}\nfn beta() {}\nfn gamma() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbols": "alpha,beta",
+        })).await;
+        assert!(!res.is_error, "multi delete failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(!updated.contains("fn alpha"), "alpha left: {updated}");
+        assert!(!updated.contains("fn beta"), "beta left: {updated}");
+        assert!(updated.contains("fn gamma"), "lost gamma: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_multi_rejects_missing_symbol_atomically() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() {}\nfn beta() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbols": "alpha,does_not_exist",
+        })).await;
+        assert!(res.is_error, "should reject missing symbol");
+        assert_eq!(fs::read_to_string(&p).unwrap(), "fn alpha() {}\nfn beta() {}\n",
+            "file must be untouched on partial resolution failure");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn replace_multi_symbols_contiguous_run() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() -> u32 { 1 }\nfn beta() -> u32 { 2 }\nfn gamma() -> u32 { 3 }\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbols": "alpha,beta",
+            "new_source": "fn combined() -> u32 { 99 }",
+        })).await;
+        assert!(!res.is_error, "multi replace failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(updated.contains("fn combined"), "no combined: {updated}");
+        assert!(!updated.contains("fn alpha"), "alpha left: {updated}");
+        assert!(!updated.contains("fn beta"), "beta left: {updated}");
+        assert!(updated.contains("fn gamma"), "lost gamma: {updated}");
         let _ = fs::remove_file(&p);
     }
 

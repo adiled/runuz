@@ -49,6 +49,7 @@ pub struct CreateArgs {
 pub struct ReplaceArgs {
     pub file_path: String,
     pub symbol: Option<String>,     // None => whole-file rewrite
+    pub symbols: Option<String>,    // comma-separated contiguous run
     pub new_source: Option<String>,
 }
 
@@ -63,7 +64,8 @@ pub struct InsertArgs {
 #[derive(Debug)]
 pub struct DeleteArgs {
     pub file_path: String,
-    pub symbol: String,
+    pub symbol: Option<String>,     // either --symbol OR --symbols
+    pub symbols: Option<String>,    // comma-separated contiguous run
 }
 
 #[derive(Debug)]
@@ -163,6 +165,7 @@ fn replace_args(pairs: &[(String, String)]) -> Result<ReplaceArgs> {
     Ok(ReplaceArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         symbol: opt(pairs, "symbol"),
+        symbols: opt(pairs, "symbols"),
         new_source: opt(pairs, "new-source"),
     })
 }
@@ -179,7 +182,8 @@ fn insert_args(pairs: &[(String, String)], anchor: &str) -> Result<InsertArgs> {
 fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
     Ok(DeleteArgs {
         file_path: req(pairs, "file-path")?.to_string(),
-        symbol: req(pairs, "symbol")?.to_string(),
+        symbol: opt(pairs, "symbol"),
+        symbols: opt(pairs, "symbols"),
     })
 }
 
@@ -205,10 +209,10 @@ fn help() {
 USAGE:
   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
   runuz create  --file-path <path> [--new-source T]
-  runuz replace --file-path <path> [--symbol S] [--new-source T]
+  runuz replace --file-path <path> [--symbol S | --symbols A,B] [--new-source T]
   runuz insert_before --file-path <path> --symbol S [--new-source T]
   runuz insert_after  --file-path <path> --symbol S [--new-source T]
-  runuz delete --file-path <path> --symbol S
+  runuz delete --file-path <path> --symbol S | --symbols A,B
   runuz write --file-path <path> --content T      (whole-file write;
                 routes code files to do_code, non-code to do_nocode)
   runuz word <scope-text> --file-path <path> [--replace T]
@@ -218,9 +222,9 @@ USAGE:
 
 All tool OPERATIONS are TOP-LEVEL subcommands:
   create        new file (fails if it exists)
-  replace       symbol-scoped, or whole-file when --symbol omitted
+  replace       symbol-scoped (or --symbols A,B for a contiguous run), whole-file when --symbol omitted
   insert_before / insert_after   splice new_source at the anchor symbol
-  delete        drop the anchor symbol's byte range
+  delete        drop the anchor symbol's byte range (or --symbols A,B for a contiguous run)
   write         whole-file create/overwrite, auto-routed by extension
   word / phrase / sentence / paragraph   linguistic scopes (omit
                 --replace to delete the resolved scope)
