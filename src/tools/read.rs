@@ -393,19 +393,26 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
         // the same way as the write ops.
         let span = if symbol == "imports" {
             crate::tools::do_code::imports_symbol(&content, lang)
+                .ok_or_else(|| "no import block found".to_string())
         } else {
             ast::resolve_path(&content, lang, symbol)
         };
-        if let Some((start, end, start_row, end_row)) = span {
-            matches += 1;
-            out.push_str(&format!("=== {} — '{symbol}' (L{start_row}-L{end_row}) ===\n",
-                path.display()));
-            let slice = content.get(start..end).unwrap_or("");
-            for (i, line) in slice.lines().enumerate() {
-                out.push_str(&format!("{:>6}\t{line}\n", start_row + i));
+        match span {
+            Ok((start, end, start_row, end_row)) => {
+                matches += 1;
+                out.push_str(&format!("=== {} — '{symbol}' (L{start_row}-L{end_row}) ===\n",
+                    path.display()));
+                let slice = content.get(start..end).unwrap_or("");
+                for (i, line) in slice.lines().enumerate() {
+                    out.push_str(&format!("{:>6}\t{line}\n", start_row + i));
+                }
+                out.push('\n');
+                if out.len() > MAX_READ_OUTPUT { break; }
             }
-            out.push('\n');
-            if out.len() > MAX_READ_OUTPUT { break; }
+            Err(e) => {
+                // surface not-found / ambiguous resolution errors
+                out.push_str(&format!("=== {} — '{symbol}': {e}\n", path.display()));
+            }
         }
     }
     if matches == 0 {

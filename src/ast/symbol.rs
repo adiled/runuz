@@ -24,6 +24,7 @@ pub(crate) enum SymbolKind {
     Enum,
     Module,  // mod / namespace
     Imports, // synthetic 'imports' block (P5)
+    Field,   // struct field (Rust)
     Other,
 }
 
@@ -39,6 +40,7 @@ impl SymbolKind {
             "enum" => SymbolKind::Enum,
             "mod" | "module" | "namespace" => SymbolKind::Module,
             "imports" => SymbolKind::Imports,
+            "field" => SymbolKind::Field,
             _ => SymbolKind::Other,
         }
     }
@@ -54,6 +56,7 @@ impl SymbolKind {
             SymbolKind::Enum     => "enum",
             SymbolKind::Module   => "mod",
             SymbolKind::Imports  => "imports",
+            SymbolKind::Field    => "field",
             SymbolKind::Other    => "?",
         }
     }

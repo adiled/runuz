@@ -130,22 +130,23 @@ fn op_replace(
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
 
-    let updated = if let Some(list) = symbols {
+    let (updated, edit_ranges) = if let Some(list) = symbols {
         match replace_multi(&original, lang, &list, &new) {
             Err(e) => return ToolResult::error(format!("{e}")),
-            Ok(u) => u,
+            Ok((u, ranges)) => (u, ranges),
         }
     } else {
         match symbol {
-            None => new.clone(),
+            None => (new.clone(), vec![(0, original.len())]),
             Some(sym_name) => match locate_symbol(&original, lang, sym_name) {
-                None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
-                Some(sym) => splice(&original, sym.start_byte, sym.end_byte, &new),
+                Err(e) => return ToolResult::error(format!("{e}")),
+                Ok(sym) => (splice(&original, sym.start_byte, sym.end_byte, &new),
+                             vec![(sym.start_byte, sym.end_byte)]),
             },
         }
     };
 
-    if let Err(msg) = ast::validate_syntax(&updated, lang) {
+    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
@@ -174,8 +175,8 @@ fn op_insert(
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
     let sym = match locate_symbol(&original, lang, sym_name) {
-        Some(s) => s,
-        None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
+        Err(e) => return ToolResult::error(format!("{e}")),
+        Ok(s) => s,
     };
     let insert_at = match anchor {
         Anchor::Before => line_start_if_indented_alone(&original, sym.start_byte),
@@ -187,8 +188,9 @@ fn op_insert(
         Anchor::After  => format!("{separator}{new}"),
     };
     let updated = splice(&original, insert_at, insert_at, &payload);
+    let edit_ranges = vec![(insert_at, insert_at)];
 
-    if let Err(msg) = ast::validate_syntax(&updated, lang) {
+    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
@@ -206,10 +208,10 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let updated = if let Some(list) = symbols {
+    let (updated, edit_ranges) = if let Some(list) = symbols {
         match delete_multi_span(&original, lang, &list) {
             Err(e) => return ToolResult::error(format!("{e}")),
-            Ok(u) => u,
+            Ok((u, ranges)) => (u, ranges),
         }
     } else {
         let sym_name = match symbol {
@@ -217,17 +219,17 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
             None => return ToolResult::error("delete needs symbol (or --symbols A,B)"),
         };
         let sym = match locate_symbol(&original, lang, sym_name) {
-            Some(s) => s,
-            None => return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display())),
+            Err(e) => return ToolResult::error(format!("{e}")),
+            Ok(s) => s,
         };
         // Drop the symbol's range PLUS the leading whitespace on its
         // own line, so we don't leave a half-line behind.
         let start = line_start_if_indented_alone(&original, sym.start_byte);
-        let end = maybe_eat_blank_line(&original, sym.end_byte);
-        splice(&original, start, end, "")
+        let end = maybe_eat_blank_line(&original, extend_field_terminator(&original, sym.end_byte, sym.kind));
+        (splice(&original, start, end, ""), vec![(start, end)])
     };
 
-    if let Err(msg) = ast::validate_syntax(&updated, lang) {
+    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
@@ -247,12 +249,13 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
 /// dot-nested ("Class.method"), sub-symbol alias walks
 /// ("alpha.body", "alpha.when.otherwise"), and the synthetic
 /// `imports` symbol.
-fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Option<Symbol> {
+fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Result<Symbol, String> {
     if name == "imports" {
-        return synthesize_imports(source, lang);
+        return synthesize_imports(source, lang)
+            .ok_or_else(|| format!("no import block found in source"));
     }
     let (start_byte, end_byte, start_row, end_row) = ast::resolve_path(source, lang, name)?;
-    Some(Symbol {
+    Ok(Symbol {
         name: name.to_string(),
         kind: SymbolKind::Other,
         start_byte, end_byte, start_row, end_row,
@@ -268,8 +271,8 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
         let name = name.trim();
         if name.is_empty() { continue; }
         let sym = match locate_symbol(source, lang, name) {
-            Some(s) => s,
-            None => return Err(format!("symbol '{name}' not found — no partial edit applied")),
+            Err(e) => return Err(format!("{e} — no partial edit applied")),
+            Ok(s) => s,
         };
         out.push(sym);
     }
@@ -283,7 +286,7 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
 /// resolved against the same source, applied in one pass, one write.
 /// Overlapping/adjacent ranges coalesce into one combined span, so a
 /// contiguous run still yields a single replacement.
-fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> Result<String, String> {
+fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> Result<(String, Vec<(usize, usize)>), String> {
     let syms = resolve_multi(source, lang, list)?;
     let mut ranges: Vec<(usize, usize)> =
         syms.iter().map(|s| (s.start_byte, s.end_byte)).collect();
@@ -297,7 +300,7 @@ fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> 
     }
     let mut out = source.to_string();
     for &(s, e) in merged.iter().rev() { out = splice(&out, s, e, new_source); }
-    Ok(out)
+    Ok((out, merged))
 }
 
 /// `delete` across several symbols — contiguous or not. Each symbol's
@@ -305,11 +308,11 @@ fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> 
 /// same source, one pass, one write. Overlapping/adjacent ranges
 /// coalesce into one combined span. A trailing newline is only eaten
 /// when the line it leaves behind is surely blank.
-fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<String, String> {
+fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<(String, Vec<(usize, usize)>), String> {
     let syms = resolve_multi(source, lang, list)?;
     let mut ranges: Vec<(usize, usize)> = syms.iter().map(|s| {
         let start = line_start_if_indented_alone(source, s.start_byte);
-        let end = maybe_eat_blank_line(source, s.end_byte);
+        let end = maybe_eat_blank_line(source, extend_field_terminator(source, s.end_byte, s.kind));
         (start, end)
     }).collect();
     ranges.sort_by_key(|r| r.0);
@@ -322,7 +325,7 @@ fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<String,
     }
     let mut out = source.to_string();
     for &(s, e) in merged.iter().rev() { out = splice(&out, s, e, ""); }
-    Ok(out)
+    Ok((out, merged))
 }
 
 /// Synthetic `imports` symbol: the leading contiguous run of
@@ -406,6 +409,23 @@ fn line_start_if_indented_alone(source: &str, index: usize) -> usize {
 /// the symbol's own line is blank after it, so we eat its newline plus
 /// any following blank (whitespace-only) lines, stopping before the
 /// first line that has content.
+
+/// Extend a delete end past a lone trailing `,`/`;` on the symbol's own
+/// line. Struct fields (whose AST range stops before the comma) would
+/// otherwise leave a dangling comma behind. Safe for any symbol: a
+/// lone terminator after a symbol's range is always decoration to drop.
+fn extend_field_terminator(source: &str, end: usize, _kind: SymbolKind) -> usize {
+    let rest = &source[end..];
+    let trimmed = rest.trim_start_matches([' ', '\t']);
+    if trimmed.starts_with(',') || trimmed.starts_with(';') {
+        let after = trimmed[1..].trim_start_matches([' ', '\t']);
+        if after.is_empty() || after.starts_with('\n') {
+            return end + 1;
+        }
+    }
+    end
+}
+
 fn maybe_eat_blank_line(source: &str, end: usize) -> usize {
     let mut j = end;
     while j < source.len() && &source[j..j + 1] != "\n" {
@@ -736,6 +756,58 @@ mod tests {
         // leaving beta at the top with no dangling blank line.
         assert!(!updated.starts_with("\n"), "dangling blank line: {updated:?}");
         assert!(updated.contains("fn beta"), "beta lost: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    // Issue #1: pre-existing parse error (Rust 2024 `safe fn`) elsewhere
+    // in the file must NOT block an edit to a clean, unrelated region.
+    #[tokio::test]
+    async fn delete_ignores_unrelated_preexisting_error() {
+        let p = tmp("rs");
+        fs::write(&p, "pub const PRODUCT_NAME: &str = \"x\";\n\nunsafe extern \"C\" {\n    #[link_name = \"getuid\"]\n    safe fn getuid() -> u32;\n}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbol": "PRODUCT_NAME",
+        })).await;
+        assert!(!res.is_error, "should delete PRODUCT_NAME despite safe fn: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(!updated.contains("PRODUCT_NAME"), "PRODUCT_NAME left: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    // Issue #2: struct fields are addressable symbols — read/replace/delete.
+    #[tokio::test]
+    async fn replace_struct_field_symbol() {
+        let p = tmp("rs");
+        fs::write(&p, "struct Record {\n    ts: u64,\n    reference: Option<String>,\n}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "Record.reference",
+            "new_source": "reference: Option<u8>",
+        })).await;
+        assert!(!res.is_error, "field replace failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(updated.contains("reference: Option<u8>"), "not replaced: {updated}");
+        assert!(updated.contains("ts: u64"), "lost sibling: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn delete_struct_field_does_not_dangle_comma() {
+        let p = tmp("rs");
+        fs::write(&p, "struct Record {\n    ts: u64,\n    c_us: u64,\n    reference: Option<String>,\n}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbol": "Record.ts",
+        })).await;
+        assert!(!res.is_error, "field delete failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(!updated.contains("ts: u64"), "ts left: {updated}");
+        assert!(updated.contains("c_us: u64"), "lost c_us: {updated}");
+        assert!(updated.contains("reference: Option<String>"), "lost reference: {updated}");
         let _ = fs::remove_file(&p);
     }
 }

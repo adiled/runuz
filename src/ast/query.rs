@@ -32,6 +32,9 @@ const RUST_QUERY: &str = r#"
 (struct_item
   name: (type_identifier) @class.name) @class.def
 
+(field_declaration
+  name: (field_identifier) @field.name) @field.def
+
 (enum_item
   name: (type_identifier) @enum.name) @enum.def
 

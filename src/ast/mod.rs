@@ -30,7 +30,7 @@ pub fn is_code_file(path: &Path) -> bool {
     detect_language(path).is_some()
 }
 
-pub fn detect_language(path: &Path) -> Option<LangSpec> {
+pub(crate) fn detect_language(path: &Path) -> Option<LangSpec> {
     let ext = path.extension().and_then(|s| s.to_str())?.to_ascii_lowercase();
     match ext.as_str() {
         "rs" => Some(LangSpec::Rust),
@@ -148,7 +148,7 @@ pub(crate) fn resolve_path(
     source: &str,
     lang: LangSpec,
     path: &str,
-) -> Option<(usize, usize, usize, usize)> {
+) -> Result<(usize, usize, usize, usize), String> {
     let segs: Vec<&str> = path.split('.').collect();
     // Index of the first alias segment, if any.
     let first_alias_idx = segs.iter().position(|s| subwalk::parse_segment(s).is_some());
@@ -156,42 +156,91 @@ pub(crate) fn resolve_path(
         Some(i) => (segs[..i].to_vec(), segs[i..].to_vec()),
         None => (segs.clone(), vec![]),
     };
-    if name_segs.is_empty() { return None; }
+    if name_segs.is_empty() { return Err("empty symbol path".into()); }
 
     let symbols = file_symbols(source, lang);
     let named = resolve_named(&symbols, &name_segs)?;
 
     if alias_segs_raw.is_empty() {
-        return Some((named.start_byte, named.end_byte, named.start_row, named.end_row));
+        return Ok((named.start_byte, named.end_byte, named.start_row, named.end_row));
     }
 
     let alias_segs: Vec<subwalk::AliasSegment> = alias_segs_raw.iter()
         .filter_map(|s| subwalk::parse_segment(s))
         .collect();
-    if alias_segs.len() != alias_segs_raw.len() { return None; }
+    if alias_segs.len() != alias_segs_raw.len() {
+        return Err(format!("unrecognized sub-symbol segment in '{path}'"));
+    }
 
-    let tree = parse(source, lang)?;
+    let tree = parse(source, lang).ok_or_else(|| "parser unavailable".to_string())?;
     let root = tree.root_node();
-    let target_node = root.descendant_for_byte_range(named.start_byte, named.end_byte)?;
-    let final_node = subwalk::resolve_subpath(target_node, &alias_segs, lang)?;
+    let target_node = root.descendant_for_byte_range(named.start_byte, named.end_byte)
+        .ok_or_else(|| format!("cannot locate node for '{path}'"))?;
+    let final_node = subwalk::resolve_subpath(target_node, &alias_segs, lang)
+        .ok_or_else(|| format!("cannot resolve sub-symbol '{path}'"))?;
     let start_byte = final_node.start_byte();
     let end_byte = final_node.end_byte();
     let start_row = final_node.start_position().row + 1;
     let end_row = final_node.end_position().row + 1;
-    Some((start_byte, end_byte, start_row, end_row))
+    Ok((start_byte, end_byte, start_row, end_row))
 }
 
-fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Option<&'a Symbol> {
-    if segs.is_empty() { return None; }
-    let mut current: Option<&Symbol> = symbols.iter().find(|s| s.name == segs[0]);
-    for &seg in &segs[1..] {
-        let parent = current?;
-        let inner = symbols.iter().find(|s| {
-            s.name == seg && s.start_byte > parent.start_byte && s.end_byte <= parent.end_byte
-        });
-        current = inner;
+fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol, String> {
+    if segs.is_empty() { return Err("empty symbol path".into()); }
+
+    // First segment: gather ALL symbols with that name. If a bare name
+    // matches multiple, that's ambiguity — fail loudly so a delete/replace
+    // never silently hits the wrong one. Nested paths disambiguate by
+    // containment below.
+    let first = segs[0];
+    let matches: Vec<&Symbol> = symbols.iter().filter(|s| s.name == first).collect();
+    if matches.is_empty() {
+        return Err(format!("symbol '{first}' not found"));
     }
-    current
+    if matches.len() > 1 && segs.len() == 1 {
+        let list: Vec<String> = matches.iter().map(|s| {
+            format!("{} {} (L{}-L{})", s.kind.tag(), s.name, s.start_row, s.end_row)
+        }).collect();
+        return Err(format!(
+            "symbol '{first}' is ambiguous — {} matches; qualify the path (e.g. 'Type.{first}' or 'Type.{first}#N'): {}",
+            matches.len(), list.join(", ")
+        ));
+    }
+    // Multi-segment path: walk down, keeping ALL candidate parents at
+    // each level (e.g. a struct and its impl may both be named `Type`),
+    // and find the next segment inside ANY of them. If more than one
+    // parent contains a matching child, that's an ambiguous step.
+    let mut candidates: Vec<&Symbol> = matches;
+    for &seg in &segs[1..] {
+        let mut children: Vec<&Symbol> = Vec::new();
+        let mut from: Vec<&Symbol> = Vec::new();
+        for parent in &candidates {
+            let inner = symbols.iter().find(|s| {
+                s.name == seg && s.start_byte > parent.start_byte && s.end_byte <= parent.end_byte
+            });
+            if let Some(s) = inner {
+                children.push(s);
+                from.push(parent);
+            }
+        }
+        if children.is_empty() {
+            let names: Vec<&str> = candidates.iter().map(|s| s.name.as_str()).collect();
+            return Err(format!("symbol '{seg}' not found inside '{}'", names.join(", ")));
+        }
+        // If a single parent is the unambiguous container, keep only its child.
+        candidates = children;
+        let _ = from;
+    }
+    if candidates.len() > 1 {
+        let list: Vec<String> = candidates.iter().map(|s| {
+            format!("{} {} (L{}-L{})", s.kind.tag(), s.name, s.start_row, s.end_row)
+        }).collect();
+        return Err(format!(
+            "symbol path '{}' is ambiguous — {} matches; add #N to disambiguate: {}",
+            segs.join("."), candidates.len(), list.join(", ")
+        ));
+    }
+    Ok(candidates[0])
 }
 
 /// Find the smallest symbol enclosing the given byte offset.
@@ -222,6 +271,59 @@ pub(crate) fn validate_syntax(source: &str, lang: LangSpec) -> Result<(), String
         return Err(format!("syntax error at line {}, column {}", row + 1, col + 1));
     }
     Ok(())
+}
+
+/// Collect the byte ranges and text of every ERROR / missing node in
+/// the tree. Text lets us match pre-existing errors across byte shifts
+/// caused by an edit (deleting/inserting bytes above an error moves its
+/// offset), so an edit touching only clean regions isn't blocked by
+/// unrelated pre-existing parse errors elsewhere (e.g. a Rust 2024
+/// `safe fn` a parser doesn't know yet).
+fn error_ranges(node: Node, src: &[u8]) -> Vec<(usize, usize, String)> {
+    let mut out = Vec::new();
+    if node.is_error() || node.is_missing() {
+        let s = node.start_byte();
+        let e = node.end_byte();
+        let text = String::from_utf8_lossy(&src[s..e]).into_owned();
+        out.push((s, e, text));
+    }
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        out.extend(error_ranges(child, src));
+    }
+    out
+}
+
+/// Post-edit syntax gate: reject ONLY if the edit introduced (or
+/// overlapped) a syntax error. `original` is the pre-edit source so we
+/// can ignore pre-existing errors that sit entirely outside the edited
+/// range. `ranges` is the set of byte ranges the write touched.
+pub(crate) fn validate_edited(
+    original: &str,
+    result: &str,
+    lang: LangSpec,
+    ranges: &[(usize, usize)],
+) -> Result<(), String> {
+    let orig_tree = parse(original, lang).ok_or_else(|| "parser unavailable".to_string())?;
+    let res_tree  = parse(result,  lang).ok_or_else(|| "parser unavailable".to_string())?;
+
+    let orig_errors = error_ranges(orig_tree.root_node(), original.as_bytes());
+    let res_errors  = error_ranges(res_tree.root_node(),  result.as_bytes());
+
+    // A result error is "introduced" if it overlaps any edited range,
+    // OR its text does not appear among the original errors (the edit
+    // produced a brand-new error somewhere).
+    let orig_texts: Vec<&str> = orig_errors.iter().map(|(_, _, t)| t.as_str()).collect();
+    let introduced = res_errors.iter().any(|(s, e, text)| {
+        ranges.iter().any(|(rs, re)| *s < *re && *e > *rs)
+            || !orig_texts.iter().any(|t| *t == text)
+    });
+
+    if !introduced {
+        return Ok(());
+    }
+    let (row, col) = first_error_position(res_tree.root_node());
+    Err(format!("syntax error at line {}, column {}", row + 1, col + 1))
 }
 
 fn first_error_position(node: Node) -> (usize, usize) {
@@ -294,6 +396,29 @@ class Beta:
         assert!(names.contains(&"alpha"), "alpha missing: {:?}", names);
         assert!(names.contains(&"Beta"),  "Beta missing: {:?}", names);
         assert!(names.contains(&"method"), "method missing: {:?}", names);
+    }
+
+    #[test]
+    fn bare_name_ambiguous_fails_loudly() {
+        let src = "pub fn empty() -> Baseline { Baseline::new() }\nstruct Baseline { }\nimpl Baseline { fn empty() -> Self { Self {} } }\n";
+        // bare `empty` matches a free fn AND a method → ambiguous
+        let r = resolve_path(src, LangSpec::Rust, "empty");
+        assert!(r.is_err(), "should be ambiguous: {:?}", r);
+        let msg = r.unwrap_err();
+        assert!(msg.contains("ambiguous"), "msg: {msg}");
+        // qualified path resolves the method inside the impl
+        let ok = resolve_path(src, LangSpec::Rust, "Baseline.empty");
+        assert!(ok.is_ok(), "qualified path should resolve: {:?}", ok);
+    }
+
+    #[test]
+    fn struct_field_resolves_as_nested_symbol() {
+        let src = "struct Record {\n    ts: u64,\n    reference: Option<String>,\n}\n";
+        let r = resolve_path(src, LangSpec::Rust, "Record.reference");
+        assert!(r.is_ok(), "field should resolve: {:?}", r);
+        let (_, _, srow, erow) = r.unwrap();
+        assert_eq!(srow, 3, "field starts row 3");
+        assert_eq!(erow, 3, "field ends row 3");
     }
 
     #[test]
