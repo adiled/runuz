@@ -1,14 +1,14 @@
 ---
-title: "humfs (Rust)"
+title: "hive (Rust)"
 description: "hum's native filesystem forager hive — symbol-aware tool surface (humfs_read, humfs_do_code, humfs_do_noncode, humfs_bash) translating chi:tool-call ↔ filesystem operations"
 ---
 
-# humfs
+# hive
 
 > _hum's native filesystem forager hive — translates `chi:"tool-call"`
 > ↔ filesystem operations, AST-grounded via tree-sitter_
 
-humfs is a symbol-aware filesystem surface for hum bees:
+hive is a symbol-aware filesystem surface for hum bees:
 
 - **`humfs_read`** — one tool for discovering, studying, and
   searching. Auto-detects path semantics (file | directory | glob).
@@ -42,7 +42,7 @@ humfs is a symbol-aware filesystem surface for hum bees:
 
 ## Architecture
 
-humfs is a **forager hive** — same shape as any other thrum-attached
+hive is a **forager hive** — same shape as any other thrum-attached
 process (openai-server, anthropic-server, ollama-server). It dials
 humd's thrum socket, says hello with `bee: ["forager"]` and its
 advertised `tools: [...]`, then handles `chi:"tool-call"` tones humd
@@ -53,30 +53,30 @@ The full chain for an OC user editing a file via humd:
 ```
 OC ─HTTP─► openai-server forager ─chi:prompt─► humd
    ─chi:prompt─► claude-cli-worker (worker hive) ─chi:tool-call(humfs_read)─►
-   humd ─chi:tool-call─► humfs-forager (this hive) ─fs op─► disk
+   humd ─chi:tool-call─► hive-forager (this hive) ─fs op─► disk
    → chi:tool-result back through the chain
 ```
 
 Foragers calling foragers. One forager originates the tool-call
 (because the worker's LLM decided to read a file); humd routes by
-`toolName` to whichever hive advertised that tool; humfs executes
+`toolName` to whichever hive advertised that tool; hive executes
 against its own disk.
 
 ## Disk scoping
 
-Each humfs forager owns its `fs.roots` snapshot, read from its local
+Each hive forager owns its `fs.roots` snapshot, read from its local
 `hum.json` at boot. Tool calls that resolve outside roots are
 rejected at the forager. Ensemble Paradigm 1 (foragers on different
-machines) follows the same shape — each humfs sees its own local
+machines) follows the same shape — each hive sees its own local
 disk under its own roots policy.
 
 ## How humd picks the fs surface for workers
 
-When humfs is registered, humd writes the union of humfs's
+When hive is registered, humd writes the union of hive's
 advertised tool names into every worker bee's
 `SpawnSpec.disallowed_tools`. The worker passes that through to its
 underlying harness, which means the harness's built-in fs tools
-stay dormant for the session — every fs intent goes through humfs.
+stay dormant for the session — every fs intent goes through hive.
 
 ## Status
 
