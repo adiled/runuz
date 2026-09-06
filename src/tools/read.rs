@@ -32,9 +32,6 @@ use serde_json::{json, Value};
 
 use crate::ast;
 
-const MAX_RESOLVED_TARGETS: usize = 200;
-const MAX_READ_OUTPUT: usize = 7500;
-const MAX_READ_BYTES: usize = 256 * 1024;
 const MAX_DEPTH: usize = 30;
 const STUDY_PREAMBLE_LINES: usize = 20;
 
@@ -130,23 +127,21 @@ fn resolve_targets(raw_path: &str) -> Vec<PathBuf> {
         return vec![p];
     }
     if meta.is_dir() {
-        return walk_dir(&p, MAX_RESOLVED_TARGETS);
+        return walk_dir(&p);
     }
     vec![]
 }
 
-fn walk_dir(dir: &Path, max: usize) -> Vec<PathBuf> {
+fn walk_dir(dir: &Path) -> Vec<PathBuf> {
     let skip = skip_dirs();
     let mut results = Vec::new();
     let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        if results.len() >= max { break; }
         let entries = match fs::read_dir(&d) {
             Ok(e) => e,
             Err(_) => continue,
         };
         for entry in entries.flatten() {
-            if results.len() >= max { break; }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             let ft = match entry.file_type() {
@@ -229,10 +224,9 @@ fn expand_glob(pattern: &str) -> Vec<PathBuf> {
         skip: &HashSet<&'static str>,
         results: &mut Vec<(PathBuf, SystemTime)>,
     ) {
-        if results.len() >= MAX_RESOLVED_TARGETS || depth > MAX_DEPTH { return; }
+        if depth > MAX_DEPTH { return; }
         let entries = match fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
         for entry in entries.flatten() {
-            if results.len() >= MAX_RESOLVED_TARGETS { return; }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             let ft = match entry.file_type() { Ok(t) => t, Err(_) => continue };
@@ -269,8 +263,7 @@ fn study_single(path: &Path) -> ToolResult {
         Ok(b) => b,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let trunc = bytes.len() > MAX_READ_BYTES;
-    let slice = if trunc { &bytes[..MAX_READ_BYTES] } else { &bytes[..] };
+    let slice = &bytes[..];
     let content = String::from_utf8_lossy(slice);
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
@@ -303,9 +296,6 @@ fn study_single(path: &Path) -> ToolResult {
             "…\n[{} more lines — pass symbol='Name' for a specific symbol, pattern='regex' for content search, or query='sub' for a fuzzy name match]\n",
             total - preamble_n
         ));
-    }
-    if trunc {
-        out.push_str(&format!("[humfs: truncated at {} KB — file is larger]\n", MAX_READ_BYTES / 1024));
     }
     cap_output(out, Some(path))
 }
@@ -357,12 +347,10 @@ fn read_by_pattern(targets: &[PathBuf], pattern: &str) -> ToolResult {
                 } else {
                     out.push_str(&format!("{}:{}\t{}\n", path.display(), lineno + 1, line));
                 }
-                if out.len() > MAX_READ_OUTPUT { break; }
             }
             byte_cursor += line.len() + 1; // +1 for the '\n'
         }
         if file_hits > 0 { files_with_hits += 1; }
-        if out.len() > MAX_READ_OUTPUT { break; }
     }
     if hits == 0 {
         return ToolResult {
@@ -407,7 +395,6 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
                     out.push_str(&format!("{:>6}\t{line}\n", start_row + i));
                 }
                 out.push('\n');
-                if out.len() > MAX_READ_OUTPUT { break; }
             }
             Err(e) => {
                 // surface not-found / ambiguous resolution errors
@@ -442,9 +429,7 @@ fn read_by_query(targets: &[PathBuf], query: &str) -> ToolResult {
                 out.push_str(&format!("{:>6}\t{line}\n", sym.start_row + i));
             }
             out.push('\n');
-            if out.len() > MAX_READ_OUTPUT { break; }
         }
-        if out.len() > MAX_READ_OUTPUT { break; }
     }
     if matches == 0 {
         return ToolResult::error(format!(
@@ -482,19 +467,11 @@ fn safe_line_count(p: &Path) -> usize {
     fs::read_to_string(p).map(|s| s.lines().count()).unwrap_or(0)
 }
 
-fn cap_output(mut s: String, title_path: Option<&Path>) -> ToolResult {
-    let truncated = s.len() > MAX_READ_OUTPUT;
-    if truncated {
-        // Truncate on a char boundary near MAX_READ_OUTPUT.
-        let mut idx = MAX_READ_OUTPUT;
-        while !s.is_char_boundary(idx) { idx -= 1; }
-        s.truncate(idx);
-        s.push_str(&format!("\n[humfs: output truncated at {MAX_READ_OUTPUT} chars]\n"));
-    }
+fn cap_output(s: String, title_path: Option<&Path>) -> ToolResult {
     ToolResult {
         output: s,
         title: title_path.map(|p| p.display().to_string()),
-        metadata: Some(json!({ "truncated": truncated })),
+        metadata: Some(json!({ "truncated": false })),
         is_error: false,
     }
 }

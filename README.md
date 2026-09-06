@@ -141,10 +141,8 @@ non-code path. `bash` is intentionally not part of the standalone CLI.
 
 ## Where did this come from?
 
-runuz was extracted from hum's `humfs` forager hive — the `humfs/`
-directory in this repo is the follow-up remote hive that shells out to
-this CLI. The standalone form here is the installable-anywhere version
-of the same tool surface.
+runuz was extracted from hum's filesystem-forager surface. The standalone
+form here is the installable-anywhere version of the same tool surface.
 
 ## License
 
