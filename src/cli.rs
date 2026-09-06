@@ -91,6 +91,7 @@ impl Args {
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--json" => json = true,
+                "--version" | "-V" => { version(); std::process::exit(0); }
                 "-h" | "--help" => { help(); std::process::exit(0); }
                 s if s.starts_with('-') => bail!("unknown flag {s:?}"),
                 s => {
@@ -106,6 +107,7 @@ impl Args {
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--json" => json = true,
+                "--version" | "-V" => { version(); std::process::exit(0); }
                 "-h" | "--help" => { help(); std::process::exit(0); }
                 _ => {
                     if let Some(key) = a.strip_prefix("--") {
@@ -233,4 +235,9 @@ All tool OPERATIONS are TOP-LEVEL subcommands:
 the synthetic top-of-file import block. --json anywhere for
 machine-readable output.
 "#);
+}
+
+
+fn version() {
+    println!("runuz {}", env!("CARGO_PKG_VERSION"));
 }

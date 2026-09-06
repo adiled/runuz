@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "runuz — a standalone filesystem tool: do_code / do_nocode / do_read for any project on Earth. AST-grounded via tree-sitter; no hum dependencies."
+repository = "https://github.com/adiled/runuz"
+homepage = "https://github.com/adiled/runuz"
+documentation = "https://github.com/adiled/runuz#readme"
+readme = "README.md"
+keywords = ["filesystem", "tree-sitter", "ast", "cli", "tools"]
+categories = ["command-line-interface", "development-tools"]
+exclude = ["humfs/**"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
