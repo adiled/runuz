@@ -1,77 +1,151 @@
-https://github.com/user-attachments/assets/625883a7-7ddf-4ce6-961f-740dac5e4c1d
-
 # runuz
 
-A standalone filesystem tool: **`do_code`**, **`do_nocode`**, **`do_read`**
-for any project on Earth. AST-grounded via tree-sitter; zero hum
-dependencies.
+A small command-line filesystem tool that **reads and edits any project on
+Earth** — code, configs, docs, data — using the real structure of the file
+rather than guessing at strings. It's AST-grounded for code (tree-sitter),
+and structure-aware for everything else. Zero dependencies on any hum
+infrastructure; it's a single binary you can install anywhere.
 
-`runuz` was extracted from hum's `humfs` forager hive (copied literally
-into [`humfs/`](humfs/) as the follow-up remote hive). The CLI here is the
-standalone, installable-anywhere form of that same tool surface.
+You use it to answer "what's in this file?" and to make surgical edits
+without touching anything you didn't mean to touch.
 
-## Build / install
+## Install it
 
 ```sh
-cargo build --release        # binary: target/release/runuz
-cargo install --path .       # install `runuz` on PATH
+cargo install --path .    # puts `runuz` on your PATH
 ```
 
-## Usage
-
-All tool operations are TOP-LEVEL subcommands, so they're discoverable
-and hard to forget:
+or build it yourself:
 
 ```sh
-# Read a file: code files get a symbol outline
-runuz read --file-path src/main.rs
-runuz read --file-path src/main.rs --symbol main
-runuz read --file-path src/ --pattern 'TODO'
+make build                # target/release/runuz
+make install              # copies it into ~/.local/bin
+```
 
-# Author code: AST-grounded, symbol-scoped (top-level ops)
-runuz create  --file-path src/main.rs --new-source 'fn main() {}'
-runuz replace --file-path src/main.rs --symbol main --new-source 'fn main() { run(); }'
-runuz insert_before --file-path src/main.rs --symbol main --new-source 'fn helper() {}'
-runuz insert_after  --file-path src/main.rs --symbol main --new-source 'fn helper() {}'
+That gives you a program called `runuz`. If your terminal can't find it,
+add this to your `~/.zshrc` or `~/.bashrc`:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Check which build you're on with `runuz --version`.
+
+## The two ideas
+
+runuz has two halves, and each one is dead simple:
+
+- **Reading.** `runuz read` opens a file and gives you a *symbol outline*:
+  the functions, classes, structs, and fields inside it, one line each.
+  Point it at a directory or a glob and it inventories what's there. Ask
+  for a specific symbol, a fuzzy name, or a regex over the content.
+- **Editing.** `runuz create / replace / insert_before / insert_after /
+  delete` make AST-grounded, symbol-scoped edits. You say *which symbol*
+  and *what new source*, and runuz splices exactly that byte range — not a
+  text search-and-replace that can hit the wrong spot. Non-code files
+  (`.env`, TOML, JSON, markdown, READMEs) get linguistic-scope edits:
+  `word`, `phrase`, `sentence`, `paragraph`.
+
+Every write is re-parsed before it lands. A broken edit is rejected and
+the original file is left untouched.
+
+## Reading
+
+```sh
+# A code file: get its symbol outline
+runuz read --file-path src/main.rs
+
+# Just one symbol
+runuz read --file-path src/main.rs --symbol main
+
+# A fuzzy name match
+runuz read --file-path src/main.rs --query auth
+
+# A regex over the content
+runuz read --file-path src/ --pattern 'TODO'
+```
+
+`read` decides the framing itself: a file gets an outline, a directory or
+glob gets an inventory, configs and docs get an anchor outline. It skips
+junk directories (`node_modules`, `.git`, `target`, ...) so a `read('/')`
+doesn't explode.
+
+## Editing code
+
+All edits are symbol-scoped — you name the symbol, runuz swaps its exact
+byte range:
+
+```sh
+# Create a new file (fails if it already exists)
+runuz create --file-path src/main.rs --new-source 'fn main() {}'
+
+# Replace a symbol's whole body
+runuz replace --file-path src/main.rs --symbol main \
+  --new-source 'fn main() { run(); }'
+
+# Splice a helper right before / after a symbol
+runuz insert_before --file-path src/main.rs --symbol main \
+  --new-source 'fn helper() {}'
+runuz insert_after --file-path src/main.rs --symbol main \
+  --new-source 'fn helper() {}'
+
+# Drop a symbol entirely
 runuz delete --file-path src/main.rs --symbol helper
 
-# Author non-code: linguistic scopes are top-level subcommands
-runuz phrase --file-path .env DATABASE_URL --replace 'postgres://new/db'
-runuz word  --file-path README.md runuz --replace runuz2
-
-# Machine-readable output
-runuz read --file-path src/main.rs --json
+# Or replace / delete several symbols in one atomic write
+runuz replace --file-path src/main.rs --symbols main,helper \
+  --new-source 'fn main() { run(); }'
 ```
 
-Every write is re-parsed for syntax errors (code) or re-validated as
-JSON (non-code) before landing; a broken edit is rejected and the
-original is left untouched.
+The top-of-file import block is addressable as the synthetic symbol
+`imports`. Symbols nest with dots (`Class.method`), and you can walk into
+sub-parts of a symbol (`main.body`, `main.loop`) — the full vocabulary is
+in [`grammar.md`](grammar.md).
 
-## Tool surface
+Omit `--symbol` on `replace` to rewrite the whole file. `write` does a
+whole-file create or overwrite, auto-routing by extension.
 
-| subcommand | what it does |
-|---|---|
-| `read` | filesystem analysis: file / directory / glob; symbol outline for code, anchor outline for configs/docs; `--symbol` (exact), `--query` (fuzzy name), `--pattern` (regex content) |
-| `create` / `replace` / `insert_before` / `insert_after` / `delete` | AST-grounded code authoring, symbol-scoped with the synthetic `imports` symbol |
-| `word` / `phrase` / `sentence` / `paragraph` | linguistic-scope non-code edits; JSON results re-validated as JSON |
+## Editing everything else
 
-(bash intentionally dropped; not part of the standalone CLI.)
+For non-code files the scopes are linguistic — you name the smallest
+unit and replace it:
+
+```sh
+# Swap one word
+runuz word --file-path .env DATABASE_URL --replace 'postgres://new/db'
+
+# Swap a phrase — structure-aware: JSON keys/values, env vars,
+# markdown headings, TOML sections
+runuz phrase --file-path README.md runuz --replace runuz2
+
+# Sentence = the single line holding the text
+runuz sentence --file-path notes.txt 'fix the bug' --replace 'done'
+
+# Paragraph = the whole blank-line block
+runuz paragraph --file-path notes.txt 'old paragraph' --replace 'new'
+```
+
+Omit `--replace` to delete the resolved scope. JSON files are re-validated
+as JSON after the edit; a broken result is rejected.
+
+## Machine-readable output
+
+Add `--json` anywhere and runuz prints `{is_error, output, title,
+metadata}` instead of text.
 
 ## Languages
 
-tree-sitter-backed AST for `rs`, `py`/`pyi`, `go`, `js`/`jsx`/`mjs`/`cjs`,
-`ts`, `tsx`. Sub-symbol walks (`body`/`when`/`otherwise`/`loop`/`try`/
-`return`/`call`) compose with dots and disambiguate with `#N`.
+AST-backed today: `rs`, `py`/`pyi`, `go`, `js`/`jsx`/`mjs`/`cjs`,
+`ts`, `tsx`. Everything else is handled by the structure-aware
+non-code path. `bash` is intentionally not part of the standalone CLI.
 
-## Layout
+## Where did this come from?
 
-- `src/lib.rs`: the reusable core (AST + tools) plus a local
-  `ToolDef`/`ToolResult` contract replicating `nest_common`, so the
-  follow-up hive re-integration is drop-in.
-- `src/main.rs` / `src/cli.rs`: the `runuz` binary.
-- `humfs/`: the **runuz remote hive** — a standalone forager over the
-  thrum protocol + humd. Advertises `humfs_read` / `humfs_do_code` /
-  `humfs_do_noncode`, routes `chi:"tool-call"` tones from humd, and
-  shells out to this `runuz` CLI for file ops (no in-process fs work).
-  Vendored wire machinery under `humfs/src/wire/` (Hid, bee identity,
-  serve_forager, XDG paths) — zero hum internals.
+runuz was extracted from hum's `humfs` forager hive — the `humfs/`
+directory in this repo is the follow-up remote hive that shells out to
+this CLI. The standalone form here is the installable-anywhere version
+of the same tool surface.
+
+## License
+
+MIT. See `LICENSE`.
