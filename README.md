@@ -12,7 +12,7 @@ without touching anything you didn't mean to touch.
 ## Install it
 
 ```sh
-cargo install --path .    # puts `runuz` on your PATH
+cargo install runuz
 ```
 
 or build it yourself:
