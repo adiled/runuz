@@ -2,35 +2,34 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  publish-crates:
+  publish-crate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Publish to crates.io
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
 
   release:
-    needs: [publish-crates]
+    needs: [publish-crate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: bundles
-          merge-multiple: true
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          gh release create "$TAG" \
-            --title "$TAG" \
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
             --generate-notes
