@@ -1,27 +1,26 @@
-//! RunuzDispatcher — the remote-hive tool registry + dispatch.
+//! RunuzDispatcher — the runuz-hive tool registry + dispatch.
 //!
 //! Translates `chi:"tool-call"` tones into `runuz` CLI invocations.
 //! The hive does NO file ops in-process: it shells out to the
 //! installed `runuz` binary (`~/.local/bin/runuz`, or `RUNUZ_BIN`)
-//! and parses the `--json` result back into a [`ToolResult`]. This is
-//! the "remote hive that uses the cli tool to do file ops" design:
+//! and parses the `--json` result back into an `mcp::protocol::ToolResult`.
+//! This is the "remote hive that uses the cli tool to do file ops" design:
 //! runuz is the executable, the hive is the thrum bridge.
 
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use hum_nest::{ToolDef, ToolResult};
 use serde_json::{json, Value};
 use tokio::process::Command;
 
-use crate::wire::{ForagerAdvert, ToolDef, ToolDispatcher, ToolResult};
+use hum_nest::ToolDispatcher;
 
-pub struct RunuzDispatcher {
-    runuz_bin: PathBuf,
-}
+pub struct RunuzDispatcher;
 
 impl RunuzDispatcher {
     pub fn new() -> Self {
-        Self { runuz_bin: runuz_bin_path() }
+        Self
     }
 }
 
@@ -49,15 +48,6 @@ impl ToolDispatcher for RunuzDispatcher {
             "humfs_do_noncode" => run_do_noncode(args).await,
             other => ToolResult::error(format!("runuz: unknown toolName {other:?}")),
         }
-    }
-}
-
-pub fn advert() -> ForagerAdvert {
-    ForagerAdvert {
-        hive: "humfs".into(),
-        version: env!("CARGO_PKG_VERSION").into(),
-        source: Some("https://github.com/adiled/runuz".into()),
-        provides: vec!["fs".into()],
     }
 }
 

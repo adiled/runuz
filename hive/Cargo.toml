@@ -3,10 +3,16 @@ name = "runuz-hive"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "runuz hive — a standalone remote forager hive for the thrum protocol. Advertises humfs_read / humfs_do_code / humfs_do_noncode and shells out to the runuz CLI for filesystem ops. No hum internals; drop-in remote hive for humd."
+description = "runuz hive — a formal remote forager hive for hum. Advertises humfs_read / humfs_do_code / humfs_do_noncode and shells out to the runuz CLI for filesystem ops. Depends on hum's reusable hive kernel (hum-nest + hum-paths + thrum-core) via git addressing; no daemon-tree imports."
 
 [dependencies]
-runuz = { path = ".." }
+# hum's reusable hive kernel — the canonical serve_forager / ForagerAdvert /
+# ToolDispatcher / ToolDef / ToolResult. Same deps hum's own humfs hive uses,
+# git-addressed from main (the hum crates aren't published to crates.io).
+hum-nest  = { git = "https://github.com/adiled/hum", branch = "main" }
+hum-paths = { git = "https://github.com/adiled/hum", branch = "main" }
+thrum-core = { git = "https://github.com/adiled/hum", branch = "main" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
@@ -14,11 +20,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "process"] }
 async-trait = "0.1"
-ed25519-dalek = "2"
-sha2 = "0.10"
-hex = "0.4"
-rand = "0.8"
-parking_lot = "0.12"
 
 [[bin]]
 name = "runuz-hive"
