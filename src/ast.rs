@@ -244,7 +244,7 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
 }
 
 /// Find the smallest symbol enclosing the given byte offset.
-/// Useful for annotating regex hits in `humfs_read` with the
+/// Useful for annotating regex hits in `runuz_read` with the
 /// function / class they sit inside.
 pub(crate) fn enclosing_symbol(symbols: &[Symbol], byte: usize) -> Option<&Symbol> {
     let mut best: Option<&Symbol> = None;
@@ -261,7 +261,7 @@ pub(crate) fn enclosing_symbol(symbols: &[Symbol], byte: usize) -> Option<&Symbo
 
 /// Return Err with a one-line message if the source has any syntax
 /// errors per the given language's parser. Used as a post-write
-/// validation gate by `humfs_do_code` (P5).
+/// validation gate by `runuz_do_code` (P5).
 pub(crate) fn validate_syntax(source: &str, lang: LangSpec) -> Result<(), String> {
     let tree = parse(source, lang).ok_or_else(|| "parser unavailable".to_string())?;
     let root = tree.root_node();

@@ -1,4 +1,4 @@
-//! `humfs_do_code` — AST-grounded code authoring.
+//! `runuz_do_code` — AST-grounded code authoring.
 //!
 //! Operations:
 //!
@@ -15,7 +15,7 @@
 //!   sat alone on indented lines, drops the surrounding blank
 //!   lines too.
 //!
-//! Non-code extensions are routed back to `humfs_do_noncode`. The
+//! Non-code extensions are routed back to `runuz_do_noncode`. The
 //! synthetic `imports` symbol covers the leading contiguous run of
 //! import / use / include / require nodes at top level — addressable
 //! via `symbol: "imports"` on any of the above operations except
@@ -47,8 +47,8 @@ fn default_op() -> String { "replace".into() }
 #[allow(dead_code)]
 pub(crate) fn def() -> ToolDef {
     ToolDef {
-        name: "humfs_do_code".into(),
-        description: "Author code — AST-grounded, symbol-scoped. Operations: create | replace (symbol OR whole-file OR symbols-list) | insert_before | insert_after | delete. The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N (P6). Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs (AST-backed today). Every write is re-parsed; a syntax-error result aborts the write. Non-code files route to humfs_do_noncode.".into(),
+        name: "runuz_do_code".into(),
+        description: "Author code — AST-grounded, symbol-scoped. Operations: create | replace (symbol OR whole-file OR symbols-list) | insert_before | insert_after | delete. The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N (P6). Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs (AST-backed today). Every write is re-parsed; a syntax-error result aborts the write. Non-code files route to runuz_do_noncode.".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -72,7 +72,7 @@ pub async fn run(args: Value) -> ToolResult {
     let lang = match ast::detect_language(&path) {
         Some(l) => l,
         None => return ToolResult::error(format!(
-            "humfs_do_code targets code files only. '{}' has no recognized code extension — route to humfs_do_noncode.",
+            "runuz_do_code targets code files only. '{}' has no recognized code extension — route to runuz_do_noncode.",
             path.display()
         )),
     };
@@ -467,7 +467,7 @@ mod tests {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     fn tmp(suffix: &str) -> PathBuf {
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join(format!("humfs-do_code-{}-{}.{}", std::process::id(), n, suffix))
+        std::env::temp_dir().join(format!("runuz-do_code-{}-{}.{}", std::process::id(), n, suffix))
     }
 
     #[tokio::test]
@@ -640,7 +640,7 @@ mod tests {
             "new_source": "# bye\n",
         })).await;
         assert!(res.is_error);
-        assert!(res.output.contains("humfs_do_noncode"), "wrong rejection: {}", res.output);
+        assert!(res.output.contains("runuz_do_noncode"), "wrong rejection: {}", res.output);
         let _ = fs::remove_file(&p);
     }
 

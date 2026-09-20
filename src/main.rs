@@ -100,6 +100,20 @@ async fn run() -> Result<ExitCode> {
             };
             print_result(&res, json);
         }
+        cli::Command::Tools => {
+            // Emit the advertised surface as JSON. This is the single
+            // source of truth the runuz-hive mirrors on-the-fly.
+            let defs = runuz::tools::surface::advertised_defs();
+            if json {
+                println!("{}", serde_json::to_string_pretty(
+                    &runuz::tools::surface::surface_json()).unwrap());
+            } else {
+                println!("runuz tools — {} advertised tools", defs.len());
+                for d in &defs {
+                    println!("  {}", d.name);
+                }
+            }
+        }
         cli::Command::DoNonCode(c) => {
             // The scope subcommand IS the scope parameter: map
             // `word|phrase|sentence|paragraph` onto the tool's scope key.

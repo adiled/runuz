@@ -21,7 +21,7 @@ base64 = "0.22"
 mime_guess = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-# AST infra — tree-sitter parsers per language (same family humfs pins).
+# AST infra — tree-sitter parsers per language (same family hum's fs hive pins).
 tree-sitter = "0.26"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"
