@@ -1,15 +1,14 @@
 //! runuz-hive — the runuz formal remote forager hive for hum.
 //!
 //! Stands up a thrum-attached forager process that advertises the
-//! runuz filesystem tool surface (`humfs_read`, `humfs_do_code`,
-//! `humfs_do_noncode`) and handles `chi:"tool-call"` tones humd
-//! routes here. Pure forager: it translates `chi:"tool-call"` into
+//! runuz filesystem tool surface on-the-fly and handles
+//! `chi:"tool-call"` tones humd routes here. Pure forager: it translates `chi:"tool-call"` into
 //! `runuz` CLI invocations — the actual file ops happen in the
 //! installed `runuz` binary, not in-process.
 //!
 //! This is a *formal remote hive*: it depends on hum's reusable hive
 //! kernel (`hum-nest`) via git addressing — the same building blocks
-//! hum's own humfs hive uses — rather than vendoring self-contained
+//! hum's own fs hive uses — rather than vendoring self-contained
 //! stand-ins or a daemon tree. It advertises its own kind (`runuz`)
 //! and a canonical persisted `fbee_<hex>` hid, so humd dedupes it
 //! across reconnects.
@@ -40,7 +39,7 @@ async fn main() -> Result<()> {
         version: env!("CARGO_PKG_VERSION").into(),
         source: Some("https://github.com/adiled/runuz/tree/main/hive".into()),
         // Hive-level capability claim: runuz owns the fs surface for
-        // whichever humd it attaches to, same as humfs.
+        // whichever humd it attaches to.
         provides: vec!["fs".into()],
     };
     serve_forager(dispatcher, advert).await
