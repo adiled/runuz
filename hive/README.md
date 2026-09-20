@@ -1,6 +1,6 @@
 ---
 title: "runuz-hive"
-description: "runuz's formal remote forager hive for hum — advertises the runuz filesystem tool surface (humfs_read, humfs_do_code, humfs_do_noncode) and translates chi:tool-call ↔ runuz CLI invocations"
+description: "runuz's formal remote forager hive for hum — mirrors the runuz CLI tool surface (runuz_<subcommand>) on-the-fly and translates chi:tool-call ↔ runuz CLI invocations"
 ---
 
 # runuz-hive
@@ -15,37 +15,41 @@ handles `chi:"tool-call"` tones humd routes here by `toolName`. It is
 a *remote hive*: the actual filesystem work happens in the installed
 `runuz` binary, not in-process — the hive is the thrum bridge.
 
-## Tools it advertises
+## Zero-maintenance: the CLI is the source of truth
 
-- **`humfs_read`** — filesystem analysis: discover, study, search.
-  Works on any file — code returns a tree-sitter symbol outline;
-  configs/docs return an anchor outline; extensionless files return
-  content. Path auto-detection: file | directory | glob. Pick at most
-  one modifier: `symbol` (exact, dot-nested), `query` (fuzzy on
-  symbol names), `pattern` (regex over content).
-- **`humfs_do_code`** — AST-grounded code authoring. Operations:
-  `create` | `replace` | `insert_before` | `insert_after` | `delete`.
-  The top-of-file import block is addressable as the synthetic
-  `imports` symbol. Sub-symbol walks compose with dots. Every write is
-  re-parsed; a syntax-error result aborts the write. Non-code files
-  route to `humfs_do_noncode`.
-- **`humfs_do_noncode`** — linguistic-scope edits for non-code. Four
-  scopes (pass exactly one): `word` (token swap), `phrase` (structural
-  name or exact text), `sentence` (whole line), `paragraph` (full
-  block). Omit `replace` to delete the scope; no scope param
-  creates/overwrites the whole file. Code files route to
-  `humfs_do_code`.
+The hive hardcodes **no tool list**. On startup it spawns
+`runuz tools --json` — which the CLI emits as one `ToolDef` per CLI
+subcommand, named `runuz_<subcommand>` — and advertises those defs
+verbatim. Dispatch is fully generic: `toolName` `runuz_<sub>` maps to
+`runuz <sub> --<kebab-key> <val>` for each schema key present, with the
+scope tools (`runuz_word` / `runuz_phrase` / `runuz_sentence` /
+`runuz_paragraph`) passing their scope value as the positional.
 
-Each tool maps 1:1 onto a `runuz` CLI subcommand (`read`, `create`,
-`replace`, `insert_before`, `insert_after`, `delete`, `word`,
-`phrase`, `sentence`, `paragraph`) plus `--json`, and the `--json`
-result is parsed back into a `hum_mcp` `ToolResult`.
+So as the `runuz` CLI surface grows, **no hive change is ever needed**:
+add a subcommand, and the hive picks it up automatically. The CLI is the
+single source of truth; the hive is a pure mirror.
+
+## Advertised tools
+
+Today the CLI reports eleven `runuz_<sub>` tools — one per subcommand:
+
+- **`runuz_read`** — filesystem analysis: discover, study, search.
+- **`runuz_create`** / **`runuz_replace`** / **`runuz_insert_before`** /
+  **`runuz_insert_after`** / **`runuz_delete`** — AST-grounded code
+  authoring (top-of-file `imports` symbol; sub-symbol walks compose with
+  dots; every write re-parsed).
+- **`runuz_write`** — whole-file write, auto-routed by extension.
+- **`runuz_word`** / **`runuz_phrase`** / **`runuz_sentence`** /
+  **`runuz_paragraph`** — linguistic-scope edits for non-code.
+
+Each maps 1:1 onto a `runuz` CLI subcommand plus `--json`, and the
+`--json` result is parsed back into a `hum_mcp` `ToolResult`.
 
 ## Architecture
 
 ```
-humd ─chi:tool-call(humfs_read)─► runuz-hive ─runuz read --json─► runuz CLI ─fs op─► disk
-   ◄─chi:tool-result───────────────────────────────────────────────◄
+humd ─chi:tool-call(runuz_read)─► runuz-hive ─runuz read --json─► runuz CLI ─fs op─► disk
+   ◄─chi:tool-result──────────────────────────────────────────────────◄
 ```
 
 The hive is pure transport: it translates `chi:"tool-call"` tones into
@@ -59,7 +63,7 @@ This is a *formal* hive, not a vendored stand-in: it depends on hum's
 reusable hive kernel via git addressing — `hum-nest` (which owns
 `serve_forager` / `ForagerAdvert` / `ToolDispatcher` / `ToolDef` /
 `ToolResult`), `hum-paths`, and `thrum-core` — the same building
-blocks hum's own `humfs` hive uses. No daemon-tree imports.
+blocks hum's own fs hive uses. No daemon-tree imports.
 
 It advertises its own kind (`hive: "runuz"`) and a canonical persisted
 `fbee_<hex>` hid derived from `$XDG_STATE_HOME/hum/bees/runuz.key`, so

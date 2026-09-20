@@ -467,7 +467,7 @@ mod tests {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     fn tmp(suffix: &str) -> PathBuf {
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join(format!("humfs-do_code-{}-{}.{}", std::process::id(), n, suffix))
+        std::env::temp_dir().join(format!("runuz-do_code-{}-{}.{}", std::process::id(), n, suffix))
     }
 
     #[tokio::test]
