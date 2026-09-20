@@ -29,6 +29,7 @@ pub enum Command {
     Delete(DeleteArgs),
     Write(WriteArgs),
     DoNonCode(DoNonCodeArgs),
+    Tools,
 }
 
 #[derive(Debug)]
@@ -131,6 +132,7 @@ impl Args {
             "write" => Command::Write(write_args(&pairs)?),
             "word" | "phrase" | "sentence" | "paragraph" =>
                 Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
+            "tools" => Command::Tools,
             other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, write, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
@@ -221,6 +223,7 @@ USAGE:
   runuz phrase <scope-text> --file-path <path> [--replace T]
   runuz sentence <scope-text> --file-path <path> [--replace T]
   runuz paragraph <scope-text> --file-path <path> [--replace T]
+  runuz tools [--json]                      (advertised tool surface)
 
 All tool OPERATIONS are TOP-LEVEL subcommands:
   create        new file (fails if it exists)

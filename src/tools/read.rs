@@ -1,4 +1,4 @@
-//! `humfs_read` — the ONE filesystem analysis tool.
+//! `runuz_read` — the ONE filesystem analysis tool.
 //!
 //! P2 covers the no-AST mode:
 //!
@@ -58,7 +58,7 @@ struct Args {
 #[allow(dead_code)]
 pub(crate) fn def() -> ToolDef {
     ToolDef {
-        name: "humfs_read".into(),
+        name: "runuz_read".into(),
         description: "Filesystem analysis: discover, study, and search. Works on any file — code returns a tree-sitter symbol outline (P4+); configs and docs return an anchor outline; extensionless files (Dockerfile, Makefile, LICENSE) and unknown extensions return content. Path auto-detection: file | directory | glob (presence of * or ?). Pick at most one modifier: symbol (exact, dot-nested for nested members), query (fuzzy case-insensitive substring match on symbol NAMES), pattern (regex over CONTENT — code matches carry their enclosing function/class symbol in P4+). The tool decides framing; no offset, no limit, no pagination.".into(),
         input_schema: json!({
             "type": "object",

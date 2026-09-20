@@ -4,6 +4,7 @@
 pub(crate) mod do_code;
 pub(crate) mod do_noncode;
 pub(crate) mod read;
+pub mod surface;
 
 // Re-export so the CLI can address them uniformly.
 pub use do_code::run as do_code;
