@@ -29,7 +29,7 @@ fn runuz_bin_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                .join(".local/bin/runuz")
+                .join(".cargo/bin/runuz")
         })
 }
 
