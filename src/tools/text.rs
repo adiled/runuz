@@ -235,19 +235,26 @@ fn find_paragraph_end(source: &str, idx: usize) -> usize {
 /// VALUE range — agents pass replace=new_json_value to swap.
 /// Falls through to substring match if not found as a key path.
 fn phrase_json(source: &str, phrase: &str) -> Option<Match> {
-    // Build a path expression: for each segment, find `"<seg>":` and
-    // then the value range. Naive — handles top-level dotted keys
-    // without nested-array indexing. Sophisticated AST resolution
-    // would parse via serde_json — but we want to operate on the
-    // RAW source bytes for splicing, so the JSON parser is for
-    // validation only.
+    // First try matching as a JSON value (string content), but NOT as a key
+    let value_pattern = format!("\"{}\"", phrase);
+    let mut search_start = 0;
+    while let Some(idx) = source[search_start..].find(&value_pattern) {
+        let abs_idx = search_start + idx;
+        // Check this is not a key (not followed by `:`)
+        let after = abs_idx + value_pattern.len();
+        let is_key = source[after..].trim_start().starts_with(':');
+        if !is_key {
+            return Some(Match { start: abs_idx, end: abs_idx + value_pattern.len() });
+        }
+        search_start = abs_idx + 1;
+    }
+    // Then try matching as a key path (dotted segments)
     let segs: Vec<&str> = phrase.split('.').collect();
     let mut cursor = 0;
     let mut last_value_range: Option<(usize, usize)> = None;
     for seg in segs {
         let key_pattern = format!("\"{}\"", seg);
         let key_idx = source[cursor..].find(&key_pattern).map(|p| cursor + p)?;
-        // Walk past key + colon + whitespace.
         let after_key = key_idx + key_pattern.len();
         let colon_off = source[after_key..].find(':')?;
         let mut value_start = after_key + colon_off + 1;

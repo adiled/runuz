@@ -29,6 +29,9 @@ tree-sitter-javascript = "0.25"
 tree-sitter-python = "0.25"
 tree-sitter-go = "0.25"
 
+[dev-dependencies]
+tempfile = "3"
+
 [[bin]]
 name = "runuz"
 path = "src/main.rs"

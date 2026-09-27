@@ -31,6 +31,7 @@ fn main() -> Result<ExitCode> {
 async fn run() -> Result<ExitCode> {
     let args = cli::Args::parse()?;
     let json = args.json;
+    let mut had_error = false;
     match args.cmd {
         cli::Command::Read(c) => {
             let res = runuz::tools::read(serde_json::json!({
@@ -39,6 +40,7 @@ async fn run() -> Result<ExitCode> {
                 "query": c.query,
                 "pattern": c.pattern,
             })).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
         cli::Command::Create(c) => {
@@ -47,6 +49,7 @@ async fn run() -> Result<ExitCode> {
                 "operation": "create",
                 "new_source": c.new_source,
             })).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
         cli::Command::Replace(c) => {
@@ -57,6 +60,7 @@ async fn run() -> Result<ExitCode> {
                 "symbols": c.symbols,
                 "new_source": c.new_source,
             })).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
         cli::Command::Insert(c) => {
@@ -66,6 +70,7 @@ async fn run() -> Result<ExitCode> {
                 "symbol": c.symbol,
                 "new_source": c.new_source,
             })).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
         cli::Command::Delete(c) => {
@@ -75,6 +80,7 @@ async fn run() -> Result<ExitCode> {
                 "symbol": c.symbol,
                 "symbols": c.symbols,
             })).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
         cli::Command::Tools => {
@@ -96,10 +102,15 @@ async fn run() -> Result<ExitCode> {
             args[c.scope.clone()] = serde_json::json!(c.scope_text);
             if let Some(v) = c.replace { args["replace"] = serde_json::json!(v); }
             let res = runuz::tools::text(args).await;
+            if res.is_error { had_error = true; }
             print_result(&res, json);
         }
     }
-    Ok(ExitCode::SUCCESS)
+    if had_error {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 fn print_result(res: &runuz::ToolResult, json: bool) {
@@ -110,11 +121,23 @@ fn print_result(res: &runuz::ToolResult, json: bool) {
             "title": res.title,
             "metadata": res.metadata,
         });
-        println!("{}", serde_json::to_string_pretty(&v).unwrap());
+        if res.is_error {
+            eprintln!("{}", serde_json::to_string_pretty(&v).unwrap());
+        } else {
+            println!("{}", serde_json::to_string_pretty(&v).unwrap());
+        }
     } else {
         if let Some(t) = &res.title {
-            println!("{t}");
+            if res.is_error {
+                eprintln!("{t}");
+            } else {
+                println!("{t}");
+            }
         }
-        println!("{}", res.output);
+        if res.is_error {
+            eprintln!("{}", res.output);
+        } else {
+            println!("{}", res.output);
+        }
     }
 }

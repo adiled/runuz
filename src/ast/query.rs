@@ -55,6 +55,21 @@ const RUST_QUERY: &str = r#"
 
 (static_item
   name: (identifier) @const.name) @const.def
+
+(closure_expression
+  parameters: (closure_parameters) @fn.name) @fn.def
+
+(while_expression
+  body: (block) @loop.name) @loop.def
+
+(for_expression
+  body: (block) @loop.name) @loop.def
+
+(if_expression
+  consequence: (block) @if.name) @if.def
+
+(match_expression
+  body: (match_block) @match.name) @match.def
 "#;
 
 const PYTHON_QUERY: &str = r#"
@@ -63,6 +78,9 @@ const PYTHON_QUERY: &str = r#"
 
 (class_definition
   name: (identifier) @class.name) @class.def
+
+(decorator
+  (identifier) @fn.name) @fn.def
 "#;
 
 const GO_QUERY: &str = r#"
@@ -83,6 +101,9 @@ const GO_QUERY: &str = r#"
 (var_declaration
   (var_spec
     name: (identifier) @var.name)) @var.def
+
+(function_literal
+  name: (identifier) @fn.name) @fn.def
 "#;
 
 const JS_QUERY: &str = r#"
@@ -102,6 +123,15 @@ const JS_QUERY: &str = r#"
 (variable_declaration
   (variable_declarator
     name: (identifier) @var.name)) @var.def
+
+(function_expression
+  name: (identifier) @fn.name) @fn.def
+
+(arrow_function
+  body: (statement_block) @fn.name) @fn.def
+
+(generator_function_declaration
+  name: (identifier) @fn.name) @fn.def
 "#;
 
 const TS_QUERY: &str = r#"
@@ -133,4 +163,13 @@ const TS_QUERY: &str = r#"
 (variable_declaration
   (variable_declarator
     name: (identifier) @var.name)) @var.def
+
+(function_expression
+  name: (identifier) @fn.name) @fn.def
+
+(arrow_function
+  body: (statement_block) @fn.name) @fn.def
+
+(generator_function_declaration
+  name: (identifier) @fn.name) @fn.def
 "#;

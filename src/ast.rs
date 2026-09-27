@@ -126,8 +126,19 @@ pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
             }
         }
         if let (Some(sym_name), Some(node)) = (name, node_for_range) {
-            let start_byte = node.start_byte();
+            let mut start_byte = node.start_byte();
             let end_byte = node.end_byte();
+            // Walk backwards through preceding siblings to include attributes
+            let mut sibling = node.prev_sibling();
+            while let Some(sib) = sibling {
+                let kind = sib.kind();
+                if kind == "attribute_item" || kind == "inner_attribute_item" {
+                    start_byte = sib.start_byte();
+                    sibling = sib.prev_sibling();
+                } else {
+                    break;
+                }
+            }
             let start_row = node.start_position().row + 1;
             let end_row = node.end_position().row + 1;
             out.push(Symbol { name: sym_name, kind, start_byte, end_byte, start_row, end_row });
@@ -281,15 +292,28 @@ pub(crate) fn validate_syntax(source: &str, lang: LangSpec) -> Result<(), String
 /// `safe fn` a parser doesn't know yet).
 fn error_ranges(node: Node, src: &[u8]) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
-    if node.is_error() || node.is_missing() {
-        let s = node.start_byte();
-        let e = node.end_byte();
-        let text = String::from_utf8_lossy(&src[s..e]).into_owned();
-        out.push((s, e, text));
-    }
-    let mut cur = node.walk();
-    for child in node.children(&mut cur) {
-        out.extend(error_ranges(child, src));
+    let mut cursor = node.walk();
+    let mut done = false;
+    while !done {
+        let n = cursor.node();
+        if n.is_error() || n.is_missing() {
+            let s = n.start_byte();
+            let e = n.end_byte();
+            let text = String::from_utf8_lossy(&src[s..e]).into_owned();
+            out.push((s, e, text));
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                done = true;
+                break;
+            }
+        }
     }
     out
 }
@@ -439,6 +463,112 @@ class Beta:
         let (_, _, srow, erow) = r.unwrap();
         assert_eq!(srow, 3, "field starts row 3");
         assert_eq!(erow, 3, "field ends row 3");
+    }
+
+    #[test]
+    fn rust_nested_functions_found() {
+        let src = r#"
+            fn outer() -> i32 {
+                fn inner() -> i32 { 1 }
+                inner()
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+        assert!(names.contains(&"inner"), "inner missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_closure_found() {
+        let src = r#"
+            fn outer() {
+                let f = |x: i32| x + 1;
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_loop_found() {
+        let src = r#"
+            fn outer() {
+                while true { break; }
+                for i in 0..10 { println!("{}", i); }
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_if_found() {
+        let src = r#"
+            fn outer() {
+                if true { println!("yes"); }
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_match_found() {
+        let src = r#"
+            fn outer() {
+                match x { 1 => "one", _ => "other" }
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_nested_module_found() {
+        let src = r#"
+            mod outer {
+                fn inner() -> i32 { 1 }
+            }
+        "#;
+        let syms = file_symbols(src, LangSpec::Rust);
+        let names: Vec<_> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"outer"), "outer missing: {:?}", names);
+        assert!(names.contains(&"inner"), "inner missing: {:?}", names);
+    }
+
+    #[test]
+    fn rust_attributes_included_in_symbol_range() {
+        let src = "#[derive(Debug)]\n#[allow(dead_code)]\nfn alpha() -> u32 { 42 }\n";
+        let syms = file_symbols(src, LangSpec::Rust);
+        let alpha = syms.iter().find(|s| s.name == "alpha").expect("alpha missing");
+        // The symbol's byte range should start at #[derive(Debug)], not at 'fn'
+        let text = &src[alpha.start_byte..alpha.end_byte];
+        assert!(text.starts_with("#[derive(Debug)]"), "should include attributes: {:?}", text);
+    }
+
+    #[test]
+    fn validate_edited_allows_preexisting_errors() {
+        // File with a pre-existing syntax error in an unrelated region
+        let original = "fn alpha() -> u32 { 1 }\nfn beta( { ;; }\n";
+        // Edit alpha (clean region) - should succeed despite beta's error
+        let updated = "fn alpha() -> u32 { 99 }\nfn beta( { ;; }\n";
+        let ranges = vec![(0, 26)]; // alpha's range
+        let result = validate_edited(original, updated, LangSpec::Rust, &ranges);
+        assert!(result.is_ok(), "pre-existing error should not block edit: {:?}", result);
+    }
+
+    #[test]
+    fn validate_edited_rejects_introduced_errors() {
+        let original = "fn alpha() -> u32 { 1 }\n";
+        let updated = "fn alpha( { ;; }\n";
+        let ranges = vec![(0, 26)];
+        let result = validate_edited(original, updated, LangSpec::Rust, &ranges);
+        assert!(result.is_err(), "edit introducing error should be rejected");
     }
 
     #[test]
