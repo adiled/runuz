@@ -122,7 +122,7 @@ pub async fn run(args: Value) -> ToolResult {
         ));
     }
 
-    if let Err(e) = std::fs::write(&path, &updated) {
+    if let Err(e) = atomic_write(&path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
 
@@ -418,6 +418,24 @@ fn splice(source: &str, start: usize, end: usize, with: &str) -> String {
     out.push_str(&source[end..]);
     out
 }
+fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(path)?;
+    let fd = f.as_raw_fd();
+    unsafe {
+        if libc::flock(fd, libc::LOCK_EX) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, path)?;
+    unsafe {
+        libc::flock(fd, libc::LOCK_UN);
+    }
+    Ok(())
+}
+
 
 fn window(source: &str, edit_start: usize, edit_end: usize, ctx_lines: usize) -> String {
     let mut ctx_start = edit_start;
@@ -444,7 +462,7 @@ fn write_whole_file(path: &Path, content: &str) -> ToolResult {
             }
         }
     }
-    if let Err(e) = std::fs::write(path, content) {
+    if let Err(e) = atomic_write(path, content) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     let verb = if existed { "Overwrote" } else { "Created" };

@@ -101,7 +101,7 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
     };
     if path.exists() {
         return ToolResult::error(format!(
-            "{} already exists. Use operation 'replace' to modify, or 'insert_before' / 'insert_after' to add adjacent to an existing symbol.",
+            "{} already exists. Use operation replace to modify, or insert_before / insert_after to add adjacent to an existing symbol.",
             path.display()
         ));
     }
@@ -115,7 +115,7 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
             }
         }
     }
-    if let Err(e) = std::fs::write(path, src) {
+    if let Err(e) = atomic_write(path, src) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     ok(format!("Created {} ({} bytes)", path.display(), src.len()), path)
@@ -152,10 +152,10 @@ fn op_replace(
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
-    if let Err(e) = std::fs::write(path, &updated) {
+    if let Err(e) = atomic_write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
-    let scope = symbol.map(|s| format!("symbol '{s}'")).unwrap_or_else(|| "whole file".into());
+    let scope = symbol.map(|s| format!("symbol {s}")).unwrap_or_else(|| "whole file".into());
     ok(format!("Replaced {} in {} ({} bytes)", scope, path.display(), updated.len()), path)
 }
 
@@ -196,7 +196,7 @@ fn op_insert(
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
-    if let Err(e) = std::fs::write(path, &updated) {
+    if let Err(e) = atomic_write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     let where_str = match anchor { Anchor::Before => "before", Anchor::After => "after" };
@@ -225,8 +225,6 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
             Err(e) => return ToolResult::error(format!("{e}")),
             Ok(s) => s,
         };
-        // Drop the symbol's range PLUS the leading whitespace on its
-        // own line, so we don't leave a half-line behind.
         let start = line_start_if_indented_alone(&original, sym.start_byte);
         let end = maybe_eat_blank_line(&original, extend_field_terminator(&original, sym.end_byte, sym.kind));
         (splice(&original, start, end, ""), vec![(start, end)])
@@ -235,11 +233,11 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
-    if let Err(e) = std::fs::write(path, &updated) {
+    if let Err(e) = atomic_write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     let what = match (&symbols, &symbol) {
-        (Some(list), _) => format!("symbols '{}'", list),
+        (Some(list), _) => format!("symbols '{list}'"),
         (None, Some(n)) => format!("symbol '{n}'"),
         (None, None) => "symbol".into(),
     };
@@ -306,7 +304,7 @@ fn op_rename(
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
-    if let Err(e) = std::fs::write(path, &updated) {
+    if let Err(e) = atomic_write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     ok(format!("Renamed '{sym_name}' to '{replacement}' in {} ({} occurrences)", path.display(), ranges.len()), path)
@@ -449,6 +447,27 @@ fn splice(source: &str, start: usize, end: usize, with: &str) -> String {
     out.push_str(&source[end..]);
     out
 }
+fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    // Acquire advisory exclusive lock on the file
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(path)?;
+    let fd = f.as_raw_fd();
+    unsafe {
+        if libc::flock(fd, libc::LOCK_EX) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    // Write to temp file, then atomic rename
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, content)?;
+    std::fs::rename(&tmp, path)?;
+    // Release lock
+    unsafe {
+        libc::flock(fd, libc::LOCK_UN);
+    }
+    Ok(())
+}
+
 
 /// Walk back to line start if everything between line-start and
 /// `index` is whitespace — so the splice point doesn't leave a half
