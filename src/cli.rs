@@ -167,6 +167,12 @@ fn create_args(pairs: &[(String, String)]) -> Result<CreateArgs> {
 }
 
 fn replace_args(pairs: &[(String, String)]) -> Result<ReplaceArgs> {
+    let allowed = ["file-path", "symbol", "symbols", "new-source"];
+    for (k, _) in pairs {
+        if !allowed.contains(&k.as_str()) {
+            bail!("unknown flag --{k} for replace. Allowed: --file-path, --symbol, --symbols, --new-source");
+        }
+    }
     Ok(ReplaceArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         symbol: opt(pairs, "symbol"),
