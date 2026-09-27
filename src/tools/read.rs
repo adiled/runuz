@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use base64::Engine;
-use crate::{ToolDef, ToolResult};
+use crate::ToolResult;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -50,23 +50,6 @@ struct Args {
     query: Option<String>,
     #[serde(default)]
     pattern: Option<String>,
-}
-
-pub(crate) fn def() -> ToolDef {
-    ToolDef {
-        name: "runuz_read".into(),
-        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a tree-sitter symbol outline; configs and docs return an anchor outline; extensionless files (Dockerfile, Makefile, LICENSE) and unknown extensions return content. Path auto-detection: file | directory | glob (presence of * or ?). Pick at most one modifier: symbol (exact, dot-nested for nested members), query (fuzzy case-insensitive substring match on symbol NAMES), pattern (regex over CONTENT, code matches carry their enclosing function/class symbol). The tool decides framing; no offset, no limit, no pagination.".into(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "file_path": { "type": "string", "description": "Absolute file path, absolute directory path, or glob pattern (detected by presence of * or ?)." },
-                "symbol":    { "type": "string", "description": "Extract a specific symbol by exact name. Dot-separated for nested (e.g. 'Class.method')." },
-                "query":     { "type": "string", "description": "Fuzzy case-insensitive substring match on symbol NAMES." },
-                "pattern":   { "type": "string", "description": "Regex over file CONTENT. For code, each match is annotated with its enclosing function/class symbol." },
-            },
-            "required": ["file_path"],
-        }),
-    }
 }
 
 pub async fn run(args: Value) -> ToolResult {
@@ -266,8 +249,6 @@ fn study_single(path: &Path) -> ToolResult {
     out.push_str(&format!("=== {} ===\n", path.display()));
     out.push_str(&format!("[{size} bytes, {total} lines]\n"));
 
-    // AST-aware section: outline first (so callers know what
-    // symbols to drill into), then the preamble lines for context.
     let outline = ast::detect_language(path).map(|lang| {
         let syms = ast::file_symbols(&content, lang);
         (lang, syms)
@@ -280,8 +261,9 @@ fn study_single(path: &Path) -> ToolResult {
     }
 
     out.push_str("preamble:\n");
-    for (i, line) in lines.iter().take(preamble_n).enumerate() {
-        out.push_str(&format!("{:>6}\t{line}\n", i + 1));
+    for line in lines.iter().take(preamble_n) {
+        out.push_str(line);
+        out.push('\n');
     }
     if total > preamble_n {
         out.push_str(&format!(
@@ -376,9 +358,6 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
     for path in targets {
         let lang = match ast::detect_language(path) { Some(l) => l, None => continue };
         let content = match fs::read_to_string(path) { Ok(s) => s, Err(_) => continue };
-        // Route the synthetic `imports` symbol through the same
-        // machinery code uses, so `read --symbol imports` works
-        // the same way as the write ops.
         let span = if symbol == "imports" {
             crate::tools::code::imports_symbol(&content, lang)
                 .ok_or_else(|| "no import block found".to_string())
@@ -386,18 +365,17 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
             ast::resolve_path(&content, lang, symbol)
         };
         match span {
-            Ok((start, end, start_row, end_row)) => {
+            Ok((start, end, _start_row, _end_row)) => {
                 matches += 1;
-                out.push_str(&format!("=== {} - '{symbol}' (L{start_row}-L{end_row}) ===\n",
-                    path.display()));
+                out.push_str(&format!("=== {} - '{symbol}' ===\n", path.display()));
                 let slice = content.get(start..end).unwrap_or("");
-                for (i, line) in slice.lines().enumerate() {
-                    out.push_str(&format!("{:>6}\t{line}\n", start_row + i));
+                for line in slice.lines() {
+                    out.push_str(line);
+                    out.push('\n');
                 }
                 out.push('\n');
             }
             Err(e) => {
-                // surface not-found / ambiguous resolution errors
                 out.push_str(&format!("=== {} - '{symbol}': {e}\n", path.display()));
             }
         }

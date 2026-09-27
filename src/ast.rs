@@ -125,12 +125,12 @@ pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
                 }
             }
         }
-        if let (Some(name), Some(node)) = (name, node_for_range) {
+        if let (Some(sym_name), Some(node)) = (name, node_for_range) {
             let start_byte = node.start_byte();
             let end_byte = node.end_byte();
             let start_row = node.start_position().row + 1;
             let end_row = node.end_position().row + 1;
-            out.push(Symbol { name, kind, start_byte, end_byte, start_row, end_row });
+            out.push(Symbol { name: sym_name, kind, start_byte, end_byte, start_row, end_row });
         }
     }
     out.sort_by_key(|s| s.start_byte);
@@ -310,8 +310,6 @@ pub(crate) fn validate_edited(
     let orig_errors = error_ranges(orig_tree.root_node(), original.as_bytes());
     let res_errors  = error_ranges(res_tree.root_node(),  result.as_bytes());
 
-    // Only consider errors that overlap the edited range.
-    // Pre-existing errors elsewhere in the file are not the edit's fault.
     let in_edit_range: Vec<_> = res_errors.iter().filter(|(s, e, _)| {
         ranges.iter().any(|(rs, re)| *s < *re && *e > *rs)
     }).collect();
@@ -320,21 +318,32 @@ pub(crate) fn validate_edited(
         return Ok(());
     }
 
-    // Check if these errors existed in the original at the same position
     let truly_new: Vec<_> = in_edit_range.iter().filter(|(s, e, text)| {
         !orig_errors.iter().any(|(os, oe, ot)| *s == *os && *e == *oe && *text == *ot)
     }).collect();
 
     if truly_new.is_empty() {
-        // Errors in edited range are pre-existing, not introduced by this edit
         return Ok(());
     }
 
     let (row, col) = first_error_position(res_tree.root_node());
-    Err(format!(
-        "edit introduced syntax error at line {}, column {}. Fix the edit before retrying. (Pre-existing errors in the file are not shown.)",
+    let pre_existing: Vec<String> = orig_errors.iter()
+        .filter(|(s, e, _)| !ranges.iter().any(|(rs, re)| *s < *re && *e > *rs))
+        .map(|(_, _, text)| text.clone())
+        .collect();
+
+    let mut msg = format!(
+        "edit introduced syntax error at line {}, column {}",
         row + 1, col + 1
-    ))
+    );
+    if !pre_existing.is_empty() {
+        msg.push_str(&format!(
+            ". File also has {} pre-existing error(s): {}",
+            pre_existing.len(),
+            pre_existing.join(", ")
+        ));
+    }
+    Err(msg)
 }
 
 fn first_error_position(node: Node) -> (usize, usize) {
