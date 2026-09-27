@@ -310,20 +310,31 @@ pub(crate) fn validate_edited(
     let orig_errors = error_ranges(orig_tree.root_node(), original.as_bytes());
     let res_errors  = error_ranges(res_tree.root_node(),  result.as_bytes());
 
-    // A result error is "introduced" if it overlaps any edited range,
-    // OR its text does not appear among the original errors (the edit
-    // produced a brand-new error somewhere).
-    let orig_texts: Vec<&str> = orig_errors.iter().map(|(_, _, t)| t.as_str()).collect();
-    let introduced = res_errors.iter().any(|(s, e, text)| {
+    // Only consider errors that overlap the edited range.
+    // Pre-existing errors elsewhere in the file are not the edit's fault.
+    let in_edit_range: Vec<_> = res_errors.iter().filter(|(s, e, _)| {
         ranges.iter().any(|(rs, re)| *s < *re && *e > *rs)
-            || !orig_texts.iter().any(|t| *t == text)
-    });
+    }).collect();
 
-    if !introduced {
+    if in_edit_range.is_empty() {
         return Ok(());
     }
+
+    // Check if these errors existed in the original at the same position
+    let truly_new: Vec<_> = in_edit_range.iter().filter(|(s, e, text)| {
+        !orig_errors.iter().any(|(os, oe, ot)| *s == *os && *e == *oe && *text == *ot)
+    }).collect();
+
+    if truly_new.is_empty() {
+        // Errors in edited range are pre-existing, not introduced by this edit
+        return Ok(());
+    }
+
     let (row, col) = first_error_position(res_tree.root_node());
-    Err(format!("syntax error at line {}, column {}", row + 1, col + 1))
+    Err(format!(
+        "edit introduced syntax error at line {}, column {}. Fix the edit before retrying. (Pre-existing errors in the file are not shown.)",
+        row + 1, col + 1
+    ))
 }
 
 fn first_error_position(node: Node) -> (usize, usize) {
