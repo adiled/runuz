@@ -1,5 +1,5 @@
-//! The runuz tool surface — `read`, `code`, `text`.
-//! (bash intentionally dropped — not part of the standalone CLI.)
+//! The runuz tool surface - `read`, `code`, `text`.
+//! (bash intentionally dropped - not part of the standalone CLI.)
 
 pub(crate) mod code;
 pub(crate) mod text;

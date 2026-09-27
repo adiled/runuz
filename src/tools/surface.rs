@@ -1,4 +1,4 @@
-//! The advertised runuz tool surface — the single source of truth the
+//! The advertised runuz tool surface - the single source of truth the
 //! runuz-hive mirrors on-the-fly.
 //!
 //! `runuz tools --json` emits one `ToolDef` per CLI subcommand, named
@@ -69,6 +69,13 @@ pub const SURFACE: &[SurfaceTool] = &[
         description: "Delete the anchor symbol's byte range (or a --symbols contiguous run). AST-grounded; re-parsed on write.",
         props: &["file_path", "symbol", "symbols"],
         required: &["file_path"],
+        positional: false,
+    },
+    SurfaceTool {
+        sub: "rename",
+        description: "Rename a symbol (function, struct, etc.) across the file. Finds all word-boundary occurrences of the name and replaces them.",
+        props: &["file_path", "symbol", "new_name"],
+        required: &["file_path", "symbol", "new_name"],
         positional: false,
     },
     SurfaceTool {

@@ -103,7 +103,7 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
         ));
     }
     if let Err(msg) = ast::validate_syntax(src, lang) {
-        return ToolResult::error(format!("rejected — new_source has {msg}"));
+        return ToolResult::error(format!("rejected - new_source has {msg}"));
     }
     if let Some(parent) = path.parent() {
         if !parent.exists() {
@@ -147,7 +147,7 @@ fn op_replace(
     };
 
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
-        return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
+        return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
@@ -191,7 +191,7 @@ fn op_insert(
     let edit_ranges = vec![(insert_at, insert_at)];
 
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
-        return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
+        return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
@@ -230,7 +230,7 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
     };
 
     if let Err(msg) = ast::validate_edited(&original, &updated, lang, &edit_ranges) {
-        return ToolResult::error(format!("rejected — result has {msg}; original left untouched"));
+        return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
     if let Err(e) = std::fs::write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));

@@ -1,18 +1,18 @@
 //! Sub-symbol walking. 7-word vocabulary that walks into the AST
 //! beyond a named symbol's range:
 //!
-//! - **`body`** — inside-block of any compound (function body, then-
+//! - **`body`** - inside-block of any compound (function body, then-
 //!   branch of if, loop body, try block). Resolves the `body` /
 //!   `consequence` named field first; falls back to the first
 //!   block-typed direct child for the language.
-//! - **`when`** — an if (`if_statement` / `if_expression`).
-//! - **`otherwise`** — the alternate branch: `else` of an if (its
+//! - **`when`** - an if (`if_statement` / `if_expression`).
+//! - **`otherwise`** - the alternate branch: `else` of an if (its
 //!   `alternative` field), `catch` of a try (catch-clause typed
 //!   descendant).
-//! - **`loop`** — for / while / loop / do.
-//! - **`try`** — try construct.
-//! - **`return`** — return statement.
-//! - **`call`** — function call.
+//! - **`loop`** - for / while / loop / do.
+//! - **`try`** - try construct.
+//! - **`return`** - return statement.
+//! - **`call`** - function call.
 //!
 //! Compose with dots; disambiguate with `#N`. Walk is document-order;
 //! `#N` counts distinct siblings, not nested matches inside earlier
@@ -71,7 +71,7 @@ fn resolve_segment<'tree>(node: Node<'tree>, seg: &AliasSegment, lang: LangSpec)
     }
 }
 
-// ── body / otherwise — context-dependent on the parent node ────────────
+// -- body / otherwise - context-dependent on the parent node ------------
 
 fn resolve_body<'tree>(node: Node<'tree>, lang: LangSpec) -> Option<Node<'tree>> {
     for field in &["body", "consequence"] {
@@ -123,7 +123,7 @@ fn walk<'tree>(
         if types.contains(c.kind()) {
             *count += 1;
             if *count == occurrence { return Some(c); }
-            // Per spec: do not descend into matched nodes — a call
+            // Per spec: do not descend into matched nodes - a call
             // inside a call is `call#1.call`, not `call#2` of the
             // enclosing scope.
             continue;

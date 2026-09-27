@@ -1,16 +1,16 @@
-//! `runuz_do_noncode` — linguistic-scope edits for non-code files.
+//! `runuz_text` - linguistic-scope edits for non-code files.
 //!
 //! Four scopes:
 //!
-//! - **`word`** — single token swap, format-agnostic. Word boundary
+//! - **`word`** - single token swap, format-agnostic. Word boundary
 //!   regex picks the exact occurrence.
-//! - **`phrase`** — structural name OR exact text. Format-aware:
+//! - **`phrase`** - structural name OR exact text. Format-aware:
 //!   JSON keys + values, env vars, markdown headings, TOML sections.
 //!   Falls back to first exact-substring match when no structural
 //!   interpretation lands.
-//! - **`sentence`** — smallest independent unit. Resolves to the
+//! - **`sentence`** - smallest independent unit. Resolves to the
 //!   single line containing the scope text.
-//! - **`paragraph`** — full block. Resolves to the blank-line
+//! - **`paragraph`** - full block. Resolves to the blank-line
 //!   paragraph (or YAML indentation block) containing the scope.
 //!
 //! Omit `replace` to delete the resolved scope; no scope parameter
@@ -50,7 +50,7 @@ struct Args {
 pub(crate) fn def() -> ToolDef {
     ToolDef {
         name: "runuz_do_noncode".into(),
-        description: "Author non-code files using linguistic scope. Four scopes (pass exactly one): word (format-agnostic token swap), phrase (structural name — JSON/YAML key, env var, markdown heading, TOML section — or exact text), sentence (smallest independent unit), paragraph (full block). Omit 'replace' to delete the scope; no scope param creates/overwrites the whole file. Handles configs, docs, markup, stylesheets, data, plain text. Code files route to runuz_do_code.".into(),
+        description: "Author non-code files using linguistic scope. Four scopes (pass exactly one): word (format-agnostic token swap), phrase (structural name - JSON/YAML key, env var, markdown heading, TOML section - or exact text), sentence (smallest independent unit), paragraph (full block). Omit 'replace' to delete the scope; no scope param creates/overwrites the whole file. Handles configs, docs, markup, stylesheets, data, plain text. Code files route to runuz_code.".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -75,7 +75,7 @@ pub async fn run(args: Value) -> ToolResult {
 
     if ast::detect_language(&path).is_some() {
         return ToolResult::error(format!(
-            "runuz_do_noncode refuses code extensions. '{}' is a code file — route to runuz_do_code.",
+            "runuz_text refuses code extensions. '{}' is a code file - route to runuz_code.",
             path.display()
         ));
     }
@@ -117,7 +117,7 @@ pub async fn run(args: Value) -> ToolResult {
     let updated = splice(&original, m.start, m.end, &replace);
     if let Err(msg) = validate_structure(&path, &original, &updated) {
         return ToolResult::error(format!(
-            "edit would corrupt {} — {msg}. File NOT modified; fix your replacement and try again.",
+            "edit would corrupt {} - {msg}. File NOT modified; fix your replacement and try again.",
             path.display()
         ));
     }
@@ -232,7 +232,7 @@ fn find_paragraph_end(source: &str, idx: usize) -> usize {
 // ── per-format phrase resolvers ───────────────────────────────────────────
 
 /// JSON: dot-nested key path ("provider.ollama"). Returns the
-/// VALUE range — agents pass replace=new_json_value to swap.
+/// VALUE range - agents pass replace=new_json_value to swap.
 /// Falls through to substring match if not found as a key path.
 fn phrase_json(source: &str, phrase: &str) -> Option<Match> {
     // First try matching as a JSON value (string content), but NOT as a key
@@ -490,7 +490,7 @@ mod tests {
             "replace": "x",
         })).await;
         assert!(res.is_error);
-        assert!(res.output.contains("runuz_do_code"));
+        assert!(res.output.contains("runuz_code"));
         let _ = fs::remove_file(&p);
     }
 

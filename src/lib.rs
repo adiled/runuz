@@ -1,4 +1,4 @@
-//! runuz — a standalone filesystem tool: `do_code`, `do_nocode`,
+//! runuz - a standalone filesystem tool: `code`, `text`,
 //! `do_read` for any project on Earth. AST-grounded via tree-sitter;
 //! zero hum dependencies. The CLI binary (`runuz`) wraps these ops.
 
@@ -6,7 +6,7 @@ pub mod ast;
 pub mod tools;
 
 // ── tool contract ────────────────────────────────────────────────────────
-// The runuz tool contract — the standalone surface the runuz-hive
+// The runuz tool contract - the standalone surface the runuz-hive
 // mirrors over the thrum protocol. Tool bodies stay drop-in identical.
 
 use serde_json::Value;

@@ -1,4 +1,4 @@
-//! AST infrastructure — tree-sitter parsers + symbol extraction.
+//! AST infrastructure - tree-sitter parsers + symbol extraction.
 //!
 //! One parser registry keyed by file extension. Each language ships:
 //!
@@ -200,7 +200,7 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
     if segs.is_empty() { return Err("empty symbol path".into()); }
 
     // First segment: gather ALL symbols with that name. If a bare name
-    // matches multiple, that's ambiguity — fail loudly so a delete/replace
+    // matches multiple, that's ambiguity - fail loudly so a delete/replace
     // never silently hits the wrong one. Nested paths disambiguate by
     // containment below.
     let first = segs[0];
@@ -213,7 +213,7 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
             format!("{} {} (L{}-L{})", s.kind.tag(), s.name, s.start_row, s.end_row)
         }).collect();
         return Err(format!(
-            "symbol '{first}' is ambiguous — {} matches; qualify the path (e.g. 'Type.{first}' or 'Type.{first}#N'): {}",
+            "symbol '{first}' is ambiguous - {} matches; qualify the path (e.g. 'Type.{first}' or 'Type.{first}#N'): {}",
             matches.len(), list.join(", ")
         ));
     }
@@ -247,7 +247,7 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
             format!("{} {} (L{}-L{})", s.kind.tag(), s.name, s.start_row, s.end_row)
         }).collect();
         return Err(format!(
-            "symbol path '{}' is ambiguous — {} matches; add #N to disambiguate: {}",
+            "symbol path '{}' is ambiguous - {} matches; add #N to disambiguate: {}",
             segs.join("."), candidates.len(), list.join(", ")
         ));
     }

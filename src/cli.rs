@@ -1,4 +1,4 @@
-//! Command-line parsing for the runuz binary — a small hand-rolled
+//! Command-line parsing for the runuz binary - a small hand-rolled
 //! parser (no clap dependency; keeps the standalone crate lean).
 //!
 //! The tool *operations* are TOP-LEVEL subcommands so they're
@@ -27,6 +27,7 @@ pub enum Command {
     Replace(ReplaceArgs),
     Insert(InsertArgs),
     Delete(DeleteArgs),
+    Rename(RenameArgs),
     DoNonCode(DoNonCodeArgs),
     Tools,
 }
@@ -66,6 +67,13 @@ pub struct DeleteArgs {
     pub file_path: String,
     pub symbol: Option<String>,
     pub symbols: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct RenameArgs {
+    pub file_path: String,
+    pub symbol: Option<String>,
+    pub new_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -122,10 +130,11 @@ impl Args {
             "insert_before" => Command::Insert(insert_args(&pairs, "before")?),
             "insert_after"  => Command::Insert(insert_args(&pairs, "after")?),
             "delete" => Command::Delete(delete_args(&pairs)?),
+            "rename" => Command::Rename(rename_args(&pairs)?),
             "word" | "phrase" | "sentence" | "paragraph" =>
                 Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
             "tools" => Command::Tools,
-            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, word, phrase, sentence, or paragraph"),
+            other => bail!("unknown subcommand {other:?} - use read, create, replace, insert_before, insert_after, delete, rename, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
     }
@@ -182,6 +191,14 @@ fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
         symbols: opt(pairs, "symbols"),
     })
 }
+fn rename_args(pairs: &[(String, String)]) -> Result<RenameArgs> {
+    Ok(RenameArgs {
+        file_path: req(pairs, "file-path")?.to_string(),
+        symbol: opt(pairs, "symbol"),
+        new_name: opt(pairs, "new-name"),
+    })
+}
+
 
 fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> Result<DoNonCodeArgs> {
     Ok(DoNonCodeArgs {
@@ -193,7 +210,7 @@ fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> R
 }
 
 fn help() {
-    println!(r#"runuz — the standalone filesystem CLI
+    println!(r#"runuz - the standalone filesystem CLI
 
 USAGE:
   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]

@@ -8,7 +8,7 @@
 //!   tag (`fn`, `method`, `class`, `const`, `type`, `enum`, `mod`)
 //!   maps to `SymbolKind` via [`SymbolKind::from_tag`].
 //!
-//! Queries deliberately stay shallow — top-level + one nesting
+//! Queries capture symbols at any nesting depth - top-level + nested
 //! level (methods inside classes/impls). Sub-symbol walks
 //! (`body`/`when`/`otherwise`/…) live in a different module (P6).
 

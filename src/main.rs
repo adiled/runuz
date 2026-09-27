@@ -1,9 +1,9 @@
-//! runuz — the standalone filesystem CLI.
+//! runuz - the standalone filesystem CLI.
 //!
 //! `read`, the five code operations (`create`, `replace`,
 //! `insert_before`, `insert_after`, `delete`), and the four linguistic
 //! scopes (`word`, `phrase`, `sentence`, `paragraph`) for any project on
-//! Earth — AST-grounded via tree-sitter, zero hum dependencies. All tool
+//! Earth - AST-grounded via tree-sitter, zero hum dependencies. All tool
 //! operations are top-level subcommands so they're discoverable and hard
 //! to forget.
 //!
@@ -83,13 +83,23 @@ async fn run() -> Result<ExitCode> {
             if res.is_error { had_error = true; }
             print_result(&res, json);
         }
+        cli::Command::Rename(c) => {
+            let res = runuz::tools::code(serde_json::json!({
+                "file_path": c.file_path,
+                "operation": "rename",
+                "symbol": c.symbol,
+                "new_name": c.new_name,
+            })).await;
+            if res.is_error { had_error = true; }
+            print_result(&res, json);
+        }
         cli::Command::Tools => {
             let defs = runuz::tools::surface::advertised_defs();
             if json {
                 println!("{}", serde_json::to_string_pretty(
                     &runuz::tools::surface::surface_json()).unwrap());
             } else {
-                println!("runuz tools — {} advertised tools", defs.len());
+                println!("runuz tools - {} advertised tools", defs.len());
                 for d in &defs {
                     println!("  {}", d.name);
                 }

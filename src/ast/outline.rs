@@ -1,4 +1,4 @@
-//! Outline formatter — turns a flat `[Symbol]` list into the
+//! Outline formatter - turns a flat `[Symbol]` list into the
 //! indented, line-annotated view `runuz_read` renders for code files.
 //!
 //! The flat list is already sorted by start_byte; we use byte
