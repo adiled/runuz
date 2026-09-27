@@ -40,6 +40,8 @@ struct Args {
     symbols: Option<String>,
     #[serde(default)]
     new_source: Option<String>,
+    #[serde(default)]
+    pub new_name: Option<String>,
 }
 
 fn default_op() -> String { "replace".into() }
@@ -72,7 +74,7 @@ pub async fn run(args: Value) -> ToolResult {
     let lang = match ast::detect_language(&path) {
         Some(l) => l,
         None => return ToolResult::error(format!(
-            "runuz_do_code targets code files only. '{}' has no recognized code extension — route to runuz_do_noncode.",
+            "runuz_code targets code files only. '{}' has no recognized code extension - route to runuz_text.",
             path.display()
         )),
     };
@@ -83,8 +85,9 @@ pub async fn run(args: Value) -> ToolResult {
         "insert_before" => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::Before),
         "insert_after"  => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::After),
         "delete" => op_delete(&path, lang, args.symbol.as_deref(), args.symbols.as_deref()),
+        "rename" => op_rename(&path, lang, args.symbol.as_deref(), args.new_name.as_deref()),
         other => ToolResult::error(format!(
-            "unknown operation '{other}' — pick one of: create, replace, insert_before, insert_after, delete"
+            "unknown operation '{other}' - pick one of: create, replace, insert_before, insert_after, delete, rename"
         )),
     }
 }
@@ -249,6 +252,66 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
 /// dot-nested ("Class.method"), sub-symbol alias walks
 /// ("alpha.body", "alpha.when.otherwise"), and the synthetic
 /// `imports` symbol.
+fn op_rename(
+    path: &Path, lang: LangSpec, symbol: Option<&str>, new_name: Option<&str>,
+) -> ToolResult {
+    let sym_name = match symbol {
+        Some(s) => s,
+        None => return ToolResult::error("rename needs symbol (the name to rename)"),
+    };
+    let replacement = match new_name {
+        Some(s) => s,
+        None => return ToolResult::error("rename needs new_name"),
+    };
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
+    };
+    let tree = match ast::parse(&original, lang) {
+        Some(t) => t,
+        None => return ToolResult::error("parser unavailable".to_string()),
+    };
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut cursor = tree.walk();
+    let mut done = false;
+    while !done {
+        let node = cursor.node();
+        if node.kind() == "identifier" || node.kind() == "type_identifier" || node.kind() == "field_identifier" {
+            if let Ok(text) = node.utf8_text(original.as_bytes()) {
+                if text == sym_name {
+                    ranges.push((node.start_byte(), node.end_byte()));
+                }
+            }
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                done = true;
+                break;
+            }
+        }
+    }
+    if ranges.is_empty() {
+        return ToolResult::error(format!("symbol '{sym_name}' not found in {}", path.display()));
+    }
+    let mut updated = original.clone();
+    for (s, e) in ranges.iter().rev() {
+        updated.replace_range(*s..*e, replacement);
+    }
+    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &ranges) {
+        return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
+    }
+    if let Err(e) = std::fs::write(path, &updated) {
+        return ToolResult::error(format!("write failed: {e}"));
+    }
+    ok(format!("Renamed '{sym_name}' to '{replacement}' in {} ({} occurrences)", path.display(), ranges.len()), path)
+}
+
 fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Result<Symbol, String> {
     if name == "imports" {
         return synthesize_imports(source, lang)
@@ -615,6 +678,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rename_symbol_skips_comments_and_strings() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() {}\n// alpha in comment\nlet s = \"alpha in string\"\nfn beta() { alpha() }\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "rename",
+            "symbol": "alpha",
+            "new_name": "renamed_fn",
+        })).await;
+        assert!(!res.is_error, "rename failed: {}", res.output);
+        let updated = fs::read_to_string(&p).unwrap();
+        assert!(updated.contains("renamed_fn"), "should rename: {updated}");
+        assert!(updated.contains("// alpha in comment"), "should keep comment: {updated}");
+        assert!(updated.contains("alpha in string"), "should keep string: {updated}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
     async fn replace_rejects_when_result_breaks_syntax() {
         let p = tmp("rs");
         fs::write(&p, "fn alpha() {}\n").unwrap();
@@ -640,7 +721,7 @@ mod tests {
             "new_source": "# bye\n",
         })).await;
         assert!(res.is_error);
-        assert!(res.output.contains("runuz_do_noncode"), "wrong rejection: {}", res.output);
+        assert!(res.output.contains("runuz_text"), "wrong rejection: {}", res.output);
         let _ = fs::remove_file(&p);
     }
 
