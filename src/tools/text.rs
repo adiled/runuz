@@ -1,4 +1,4 @@
-//! `humfs_do_noncode` — linguistic-scope edits for non-code files.
+//! `runuz_do_noncode` — linguistic-scope edits for non-code files.
 //!
 //! Four scopes:
 //!
@@ -15,7 +15,7 @@
 //!
 //! Omit `replace` to delete the resolved scope; no scope parameter
 //! creates / overwrites the whole file. Code extensions route back
-//! to `humfs_do_code`.
+//! to `runuz_do_code`.
 //!
 //! Structural validation: when the original file is valid JSON,
 //! the post-edit result must also parse as JSON or the write is
@@ -49,8 +49,8 @@ struct Args {
 #[allow(dead_code)]
 pub(crate) fn def() -> ToolDef {
     ToolDef {
-        name: "humfs_do_noncode".into(),
-        description: "Author non-code files using linguistic scope. Four scopes (pass exactly one): word (format-agnostic token swap), phrase (structural name — JSON/YAML key, env var, markdown heading, TOML section — or exact text), sentence (smallest independent unit), paragraph (full block). Omit 'replace' to delete the scope; no scope param creates/overwrites the whole file. Handles configs, docs, markup, stylesheets, data, plain text. Code files route to humfs_do_code.".into(),
+        name: "runuz_do_noncode".into(),
+        description: "Author non-code files using linguistic scope. Four scopes (pass exactly one): word (format-agnostic token swap), phrase (structural name — JSON/YAML key, env var, markdown heading, TOML section — or exact text), sentence (smallest independent unit), paragraph (full block). Omit 'replace' to delete the scope; no scope param creates/overwrites the whole file. Handles configs, docs, markup, stylesheets, data, plain text. Code files route to runuz_do_code.".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -75,7 +75,7 @@ pub async fn run(args: Value) -> ToolResult {
 
     if ast::detect_language(&path).is_some() {
         return ToolResult::error(format!(
-            "humfs_do_noncode refuses code extensions. '{}' is a code file — route to humfs_do_code.",
+            "runuz_do_noncode refuses code extensions. '{}' is a code file — route to runuz_do_code.",
             path.display()
         ));
     }
@@ -458,7 +458,7 @@ mod tests {
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     fn tmp(ext: &str) -> PathBuf {
         let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join(format!("humfs-do_noncode-{}-{}.{}", std::process::id(), n, ext))
+        std::env::temp_dir().join(format!("runuz-do_noncode-{}-{}.{}", std::process::id(), n, ext))
     }
 
     #[tokio::test]
@@ -483,7 +483,7 @@ mod tests {
             "replace": "x",
         })).await;
         assert!(res.is_error);
-        assert!(res.output.contains("humfs_do_code"));
+        assert!(res.output.contains("runuz_do_code"));
         let _ = fs::remove_file(&p);
     }
 

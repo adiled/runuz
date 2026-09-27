@@ -6,9 +6,8 @@ pub mod ast;
 pub mod tools;
 
 // ── tool contract ────────────────────────────────────────────────────────
-// Replicates humfs's `nest_common::ToolDef`/`ToolResult` so the tool
-// bodies stay drop-in identical. A hive re-integration can reuse this
-// same contract over the thrum protocol.
+// The runuz tool contract — the standalone surface the runuz-hive
+// mirrors over the thrum protocol. Tool bodies stay drop-in identical.
 
 use serde_json::Value;
 
