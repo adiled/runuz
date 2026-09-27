@@ -27,7 +27,6 @@ pub enum Command {
     Replace(ReplaceArgs),
     Insert(InsertArgs),
     Delete(DeleteArgs),
-    Write(WriteArgs),
     DoNonCode(DoNonCodeArgs),
     Tools,
 }
@@ -49,37 +48,31 @@ pub struct CreateArgs {
 #[derive(Debug)]
 pub struct ReplaceArgs {
     pub file_path: String,
-    pub symbol: Option<String>,     // None => whole-file rewrite
-    pub symbols: Option<String>,    // comma-separated contiguous run
+    pub symbol: Option<String>,
+    pub symbols: Option<String>,
     pub new_source: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct InsertArgs {
     pub file_path: String,
-    pub anchor: String,             // before | after
-    pub symbol: String,             // the anchor symbol
+    pub anchor: String,
+    pub symbol: String,
     pub new_source: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct DeleteArgs {
     pub file_path: String,
-    pub symbol: Option<String>,     // either --symbol OR --symbols
-    pub symbols: Option<String>,    // comma-separated contiguous run
-}
-
-#[derive(Debug)]
-pub struct WriteArgs {
-    pub file_path: String,
-    pub content: String,
+    pub symbol: Option<String>,
+    pub symbols: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct DoNonCodeArgs {
     pub file_path: String,
-    pub scope: String,          // word | phrase | sentence | paragraph
-    pub scope_text: String,     // positional scope parameter value
+    pub scope: String,
+    pub scope_text: String,
     pub replace: Option<String>,
 }
 
@@ -129,11 +122,10 @@ impl Args {
             "insert_before" => Command::Insert(insert_args(&pairs, "before")?),
             "insert_after"  => Command::Insert(insert_args(&pairs, "after")?),
             "delete" => Command::Delete(delete_args(&pairs)?),
-            "write" => Command::Write(write_args(&pairs)?),
             "word" | "phrase" | "sentence" | "paragraph" =>
                 Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
             "tools" => Command::Tools,
-            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, write, word, phrase, sentence, or paragraph"),
+            other => bail!("unknown subcommand {other:?} — use read, create, replace, insert_before, insert_after, delete, word, phrase, sentence, or paragraph"),
         };
         Ok(Args { cmd, json })
     }
@@ -191,13 +183,6 @@ fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
     })
 }
 
-fn write_args(pairs: &[(String, String)]) -> Result<WriteArgs> {
-    Ok(WriteArgs {
-        file_path: req(pairs, "file-path")?.to_string(),
-        content: req(pairs, "content")?.to_string(),
-    })
-}
-
 fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> Result<DoNonCodeArgs> {
     Ok(DoNonCodeArgs {
         file_path: req(pairs, "file-path")?.to_string(),
@@ -217,8 +202,6 @@ USAGE:
   runuz insert_before --file-path <path> --symbol S [--new-source T]
   runuz insert_after  --file-path <path> --symbol S [--new-source T]
   runuz delete --file-path <path> --symbol S | --symbols A,B
-  runuz write --file-path <path> --content T      (whole-file write;
-                routes code files to do_code, non-code to do_nocode)
   runuz word <scope-text> --file-path <path> [--replace T]
   runuz phrase <scope-text> --file-path <path> [--replace T]
   runuz sentence <scope-text> --file-path <path> [--replace T]
@@ -230,7 +213,6 @@ All tool OPERATIONS are TOP-LEVEL subcommands:
   replace       symbol-scoped (or --symbols A,B for a contiguous run), whole-file when --symbol omitted
   insert_before / insert_after   splice new_source at the anchor symbol
   delete        drop the anchor symbol's byte range (or --symbols A,B for a contiguous run)
-  write         whole-file create/overwrite, auto-routed by extension
   word / phrase / sentence / paragraph   linguistic scopes (omit
                 --replace to delete the resolved scope)
 
@@ -239,7 +221,6 @@ the synthetic top-of-file import block. --json anywhere for
 machine-readable output.
 "#);
 }
-
 
 fn version() {
     println!("runuz {}", env!("CARGO_PKG_VERSION"));

@@ -31,7 +31,7 @@ pub struct SurfaceTool {
 pub const SURFACE: &[SurfaceTool] = &[
     SurfaceTool {
         sub: "read",
-        description: "Filesystem analysis: discover, study, and search. Works on any file — code returns a tree-sitter symbol outline; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested), query (fuzzy on symbol NAMES), pattern (regex over CONTENT).",
+        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a tree-sitter symbol outline; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested), query (fuzzy on symbol NAMES), pattern (regex over CONTENT).",
         props: &["file_path", "symbol", "query", "pattern"],
         required: &["file_path"],
         positional: false,
@@ -45,7 +45,7 @@ pub const SURFACE: &[SurfaceTool] = &[
     },
     SurfaceTool {
         sub: "replace",
-        description: "Replace code — symbol-scoped, or whole-file when symbol is omitted. AST-grounded; every write is re-parsed and a syntax-error result aborts.",
+        description: "Replace code - symbol-scoped, or whole-file when symbol is omitted. AST-grounded; every write is re-parsed and a syntax-error result aborts.",
         props: &["file_path", "symbol", "symbols", "new_source"],
         required: &["file_path"],
         positional: false,
@@ -69,13 +69,6 @@ pub const SURFACE: &[SurfaceTool] = &[
         description: "Delete the anchor symbol's byte range (or a --symbols contiguous run). AST-grounded; re-parsed on write.",
         props: &["file_path", "symbol", "symbols"],
         required: &["file_path"],
-        positional: false,
-    },
-    SurfaceTool {
-        sub: "write",
-        description: "Whole-file write, auto-routed by extension: code files go through the AST-grounded code author, non-code through linguistic-scope author.",
-        props: &["file_path", "content"],
-        required: &["file_path", "content"],
         positional: false,
     },
     SurfaceTool {
