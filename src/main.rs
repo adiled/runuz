@@ -18,12 +18,9 @@
 //!   runuz sentence <scope> --file-path <path> [--replace T]
 //!   runuz paragraph <scope> --file-path <path> [--replace T]
 
-use std::process::ExitCode;
-
-use anyhow::Result;
-use runuz::tools::ToolResult;
-
 mod cli;
+
+use clap::Parser;
 
 fn main() -> Result<ExitCode> {
     // The tool bodies are async (they match the forager contract);
@@ -46,7 +43,7 @@ async fn run() -> Result<ExitCode> {
             print_result(&res, json);
         }
         cli::Command::Create(c) => {
-            let res = runuz::tools::do_code(serde_json::json!({
+            let res = runuz::tools::code(serde_json::json!({
                 "file_path": c.file_path,
                 "operation": "create",
                 "new_source": c.new_source,
@@ -54,7 +51,7 @@ async fn run() -> Result<ExitCode> {
             print_result(&res, json);
         }
         cli::Command::Replace(c) => {
-            let res = runuz::tools::do_code(serde_json::json!({
+            let res = runuz::tools::code(serde_json::json!({
                 "file_path": c.file_path,
                 "operation": "replace",
                 "symbol": c.symbol,
@@ -64,7 +61,7 @@ async fn run() -> Result<ExitCode> {
             print_result(&res, json);
         }
         cli::Command::Insert(c) => {
-            let res = runuz::tools::do_code(serde_json::json!({
+            let res = runuz::tools::code(serde_json::json!({
                 "file_path": c.file_path,
                 "operation": if c.anchor == "before" { "insert_before" } else { "insert_after" },
                 "symbol": c.symbol,
@@ -73,7 +70,7 @@ async fn run() -> Result<ExitCode> {
             print_result(&res, json);
         }
         cli::Command::Delete(c) => {
-            let res = runuz::tools::do_code(serde_json::json!({
+            let res = runuz::tools::code(serde_json::json!({
                 "file_path": c.file_path,
                 "operation": "delete",
                 "symbol": c.symbol,
@@ -83,17 +80,17 @@ async fn run() -> Result<ExitCode> {
         }
         cli::Command::Write(c) => {
             // Whole-file write, auto-routed by extension:
-            //   code file   -> do_code replace (no symbol => whole-file)
-            //   non-code    -> do_nocode with no scope => write_whole_file
+            //   code file   -> code replace (no symbol => whole-file)
+            //   non-code    -> text with no scope => write_whole_file
             let is_code = runuz::ast::is_code_file(std::path::Path::new(&c.file_path));
             let res = if is_code {
-                runuz::tools::do_code(serde_json::json!({
+                runuz::tools::code(serde_json::json!({
                     "file_path": c.file_path,
                     "operation": "replace",
                     "new_source": c.content,
                 })).await
             } else {
-                runuz::tools::do_noncode(serde_json::json!({
+                runuz::tools::text(serde_json::json!({
                     "file_path": c.file_path,
                     "replace": c.content,
                 })).await
@@ -122,7 +119,7 @@ async fn run() -> Result<ExitCode> {
             });
             args[c.scope.clone()] = serde_json::json!(c.scope_text);
             if let Some(v) = c.replace { args["replace"] = serde_json::json!(v); }
-            let res = runuz::tools::do_noncode(args).await;
+            let res = runuz::tools::text(args).await;
             print_result(&res, json);
         }
     }
