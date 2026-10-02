@@ -1,6 +1,6 @@
 //! runuz - a standalone filesystem tool: `code`, `text`,
-//! `do_read` for any project on Earth. AST-grounded via tree-sitter;
-//! zero hum dependencies. The CLI binary (`runuz`) wraps these ops.
+//! `read` for any project on Earth. AST-grounded via tree-sitter.
+//! The CLI binary (`runuz`) wraps these ops.
 
 pub mod ast;
 pub mod tools;

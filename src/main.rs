@@ -3,9 +3,8 @@
 //! `read`, the five code operations (`create`, `replace`,
 //! `insert_before`, `insert_after`, `delete`), and the four linguistic
 //! scopes (`word`, `phrase`, `sentence`, `paragraph`) for any project on
-//! Earth - AST-grounded via tree-sitter, zero hum dependencies. All tool
-//! operations are top-level subcommands so they're discoverable and hard
-//! to forget.
+//! Earth - AST-grounded via tree-sitter. All tool operations are
+//! top-level subcommands so they're discoverable and hard to forget.
 //!
 //!   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
 //!   runuz create  --file-path <path> [--new-source T]

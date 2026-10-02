@@ -9,8 +9,8 @@ A `--symbol` names a definition in the file. Top-level definitions are
 the functions, classes, structs, impls, enums, type aliases, and modules
 the language's tree-sitter query captures. Symbols nest with dots:
 
-- `Class.method` — a method inside a class/struct/impl.
-- `imports` — the synthetic symbol covering the leading contiguous run of
+- `Class.method` - a method inside a class/struct/impl.
+- `imports` - the synthetic symbol covering the leading contiguous run of
   `import` / `use` / `include` / `require` nodes at top level.
 
 ## Sub-symbol walks
@@ -46,8 +46,8 @@ matches inside earlier ones (a call inside a call is `call#1.call`, not
 ## Multiple symbols
 
 `--symbols A,B` (replace / delete) resolves each name against the same
-file and splices each symbol's own range in one atomic write — contiguous
-or not. Any missing name aborts with no partial edit.
+file and splices each symbol's own range in one atomic write (contiguous
+or not). Any missing name aborts with no partial edit.
 
 ## Non-code scopes
 
