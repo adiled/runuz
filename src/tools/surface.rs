@@ -31,7 +31,7 @@ pub struct SurfaceTool {
 pub const SURFACE: &[SurfaceTool] = &[
     SurfaceTool {
         sub: "read",
-        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps); configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested — the ONE path that outputs a symbol's internal code), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
+        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps) with per-symbol callees as a `→ name, name` suffix; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested — the ONE path that outputs a symbol's internal code, prefixed by its calls: line), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
         props: &["file_path", "symbol", "query", "pattern"],
         required: &["file_path"],
         positional: false,
