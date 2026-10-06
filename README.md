@@ -30,7 +30,7 @@ If you run hum, ship [`hive/`](hive/)'s `Orchfile` and run
 `hum hive install <target>` to build `runuz-hive` and register the bee
 with orchd. See [`hive/README.md`](hive/README.md).
 
-## Languages
+## Supported files
 
 - [x] Rust (`rs`)
 - [x] Python (`py`, `pyi`)
@@ -38,6 +38,7 @@ with orchd. See [`hive/README.md`](hive/README.md).
 - [x] JavaScript (`js`, `jsx`, `mjs`, `cjs`)
 - [x] TypeScript (`ts`)
 - [x] TSX (`tsx`)
+- [x] Structured files (`json`, `yaml`, `toml`, `env`)
 - [x] All text files
 
 ## License
