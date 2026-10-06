@@ -689,3 +689,22 @@ fn read_pattern_across_directory() {
     assert!(ok, "read pattern should succeed");
     assert!(stdout.contains("alpha") || stdout.contains("beta"), "should find matches: {stdout}");
 }
+
+#[test]
+fn help_installs_man_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let cargo_home = dir.path().join("cargo_home");
+    let home = dir.path().join("home");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runuz"))
+        .arg("--help")
+        .env("CARGO_HOME", &cargo_home)
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "help should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(stdout.contains("now you can also read man runuz"), "man line missing: {stdout}");
+    let page = cargo_home.join("share/man/man1/runuz.1");
+    let content = std::fs::read_to_string(&page).unwrap();
+    assert!(content.contains(".TH RUNUZ 1"), "not a roff man page: {content}");
+}
