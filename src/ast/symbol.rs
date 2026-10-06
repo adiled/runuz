@@ -17,7 +17,8 @@ pub(crate) struct Symbol {
 pub(crate) enum SymbolKind {
     Function,
     Method,
-    Class,   // class / struct / impl / trait / interface
+    Class,   // class / struct / trait / interface
+    Impl,    // impl block — labeled distinctly from the type it implements
     Const,
     Var,     // mutable top-level binding (let, var)
     Type,    // type alias
@@ -33,7 +34,8 @@ impl SymbolKind {
         match tag {
             "fn" | "function" => SymbolKind::Function,
             "method" => SymbolKind::Method,
-            "class" | "struct" | "trait" | "interface" | "impl" => SymbolKind::Class,
+            "class" | "struct" | "trait" | "interface" => SymbolKind::Class,
+            "impl" => SymbolKind::Impl,
             "const" => SymbolKind::Const,
             "var" | "let" => SymbolKind::Var,
             "type" => SymbolKind::Type,
@@ -50,6 +52,7 @@ impl SymbolKind {
             SymbolKind::Function => "fn",
             SymbolKind::Method   => "method",
             SymbolKind::Class    => "class",
+            SymbolKind::Impl     => "impl",
             SymbolKind::Const    => "const",
             SymbolKind::Var      => "var",
             SymbolKind::Type     => "type",

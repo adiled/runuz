@@ -2,15 +2,19 @@
 //!
 //! - **Path resolution**: file | directory | glob (auto-detected by
 //!   `*` or `?` in the path).
-//! - **Modifier-free single-target**: line-numbered preamble +
-//!   stats; AST symbol outline for code files.
+//! - **Modifier-free single-target**: structure-only view for code
+//!   files (symbol outline: kinds, names, line ranges — no source
+//!   dumps); line-numbered preamble + stats.
 //! - **Modifier-free multi-target**: inventory view (one line per
 //!   resolved file, line count + size).
 //! - **`pattern`**: regex over file CONTENT. Returns matching lines
 //!   with `path:line` annotation. Code-file enclosing-symbol
 //!   annotation included.
-//! - **`symbol` / `query`**: symbol extraction by exact name or
-//!   fuzzy case-insensitive substring match on symbol names.
+//! - **`symbol`**: the ONE path that outputs a symbol's internal
+//!   code — the exact byte range of the named (dot-nested) symbol.
+//! - **`query`**: fuzzy case-insensitive substring match on symbol
+//!   NAMES. Returns a structure listing (kind + name + lines), never
+//!   source text.
 //!
 //! Skips junk dirs (`node_modules`, `.git`, `target`, `__pycache__`,
 //! `dist`, `build`, etc.) on dir walks and glob expansion. Caps
@@ -401,15 +405,17 @@ fn read_by_query(targets: &[PathBuf], query: &str) -> ToolResult {
         let lang = match ast::detect_language(path) { Some(l) => l, None => continue };
         let content = match fs::read_to_string(path) { Ok(s) => s, Err(_) => continue };
         let syms = ast::file_symbols(&content, lang);
-        for sym in syms.iter().filter(|s| s.name.to_lowercase().contains(&needle)) {
+        let hits: Vec<_> = syms.iter()
+            .filter(|s| s.name.to_lowercase().contains(&needle))
+            .collect();
+        if hits.is_empty() { continue; }
+        out.push_str(&format!("=== {} ===\n", path.display()));
+        for sym in hits {
             matches += 1;
-            out.push_str(&format!("=== {} - {} {} (L{}-L{}) ===\n",
-                path.display(), sym.kind.tag(), sym.name, sym.start_row, sym.end_row));
-            let slice = content.get(sym.start_byte..sym.end_byte).unwrap_or("");
-            for (i, line) in slice.lines().enumerate() {
-                out.push_str(&format!("{:>6}\t{line}\n", sym.start_row + i));
-            }
-            out.push('\n');
+            out.push_str(&format!(
+                "{} {} L{}-L{}\n",
+                sym.kind.tag(), sym.name, sym.start_row, sym.end_row
+            ));
         }
     }
     if matches == 0 {
@@ -417,8 +423,11 @@ fn read_by_query(targets: &[PathBuf], query: &str) -> ToolResult {
             "no symbol name matches '{query}' across {} target(s)", targets.len()
         ));
     }
+    let mut header = format!("[{matches} symbol(s) match '{query}']\n\n");
+    header.push_str(&out);
+    header.push_str("\n[Structure listing - pass symbol='Name' to read a symbol's internal code.]\n");
     ToolResult {
-        output: out,
+        output: header,
         title: Some(format!("query:{query}")),
         metadata: Some(json!({ "path": format!("query:{query}") })),
         is_error: false,

@@ -4,8 +4,13 @@
 //! The flat list is already sorted by start_byte; we use byte
 //! containment to derive nesting: if symbol B's range sits inside
 //! symbol A's range, B is indented under A.
+//!
+//! The outline is STRUCTURE ONLY: named definitions with kinds and
+//! line ranges. No source text, no anonymous control-flow nodes.
+//! Reading a symbol's internal code is a separate operation
+//! (`read --symbol Name`).
 
-use crate::ast::Symbol;
+use crate::ast::{Symbol, SymbolKind};
 
 pub(crate) fn format_symbols(symbols: &[Symbol]) -> String {
     if symbols.is_empty() {
@@ -14,6 +19,8 @@ pub(crate) fn format_symbols(symbols: &[Symbol]) -> String {
     let mut out = String::new();
     let mut stack: Vec<usize> = Vec::new(); // indices of "open" parents
     for (i, sym) in symbols.iter().enumerate() {
+        // Anonymous captures must never appear in the outline.
+        if sym.kind == SymbolKind::Other { continue; }
         // Pop stack while current sym is NOT inside the top of stack.
         while let Some(&top) = stack.last() {
             if sym.start_byte < symbols[top].end_byte {

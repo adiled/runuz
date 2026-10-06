@@ -145,6 +145,11 @@ pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
         }
     }
     out.sort_by_key(|s| s.start_byte);
+    // Defense-in-depth: never surface unnamed/anonymous captures.
+    // The queries only capture named structural definitions, but if a
+    // future query ever yields an `Other` (tag `?`) it must not leak
+    // into outlines, ambiguity lists, or pattern annotations.
+    out.retain(|s| s.kind != SymbolKind::Other);
     out
 }
 

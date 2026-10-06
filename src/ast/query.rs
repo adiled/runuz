@@ -5,8 +5,16 @@
 //! - Each captured definition pairs a `@<tag>.def` capture (whose
 //!   byte range becomes the symbol's range) with a `@<tag>.name`
 //!   capture (whose text becomes the symbol's name). The `.def`
-//!   tag (`fn`, `method`, `class`, `const`, `type`, `enum`, `mod`)
-//!   maps to `SymbolKind` via [`SymbolKind::from_tag`].
+//!   tag (`fn`, `method`, `class`, `impl`, `const`, `type`, `enum`,
+//!   `mod`) maps to `SymbolKind` via [`SymbolKind::from_tag`].
+//!
+//! Only NAMED structural definitions are captured: functions,
+//! methods, classes/structs/traits, impl blocks, enums, type
+//! aliases, modules, consts/statics, and struct fields. Control-flow
+//! internals (closures, if/match/loop bodies, arrow functions,
+//! decorators, function literals) are NOT symbols — their structure
+//! is reachable via sub-symbol walks (`body`/`when`/`loop`/…), and
+//! the outline must stay quiet.
 //!
 //! Queries capture symbols at any nesting depth - top-level + nested
 //! level (methods inside classes/impls). Sub-symbol walks
@@ -42,7 +50,7 @@ const RUST_QUERY: &str = r#"
   name: (type_identifier) @class.name) @class.def
 
 (impl_item
-  type: (type_identifier) @class.name) @class.def
+  type: (type_identifier) @impl.name) @impl.def
 
 (type_item
   name: (type_identifier) @type.name) @type.def
@@ -55,21 +63,6 @@ const RUST_QUERY: &str = r#"
 
 (static_item
   name: (identifier) @const.name) @const.def
-
-(closure_expression
-  parameters: (closure_parameters) @fn.name) @fn.def
-
-(while_expression
-  body: (block) @loop.name) @loop.def
-
-(for_expression
-  body: (block) @loop.name) @loop.def
-
-(if_expression
-  consequence: (block) @if.name) @if.def
-
-(match_expression
-  body: (match_block) @match.name) @match.def
 "#;
 
 const PYTHON_QUERY: &str = r#"
@@ -78,9 +71,6 @@ const PYTHON_QUERY: &str = r#"
 
 (class_definition
   name: (identifier) @class.name) @class.def
-
-(decorator
-  (identifier) @fn.name) @fn.def
 "#;
 
 const GO_QUERY: &str = r#"
@@ -101,9 +91,6 @@ const GO_QUERY: &str = r#"
 (var_declaration
   (var_spec
     name: (identifier) @var.name)) @var.def
-
-(function_literal
-  name: (identifier) @fn.name) @fn.def
 "#;
 
 const JS_QUERY: &str = r#"
@@ -126,9 +113,6 @@ const JS_QUERY: &str = r#"
 
 (function_expression
   name: (identifier) @fn.name) @fn.def
-
-(arrow_function
-  body: (statement_block) @fn.name) @fn.def
 
 (generator_function_declaration
   name: (identifier) @fn.name) @fn.def
@@ -166,9 +150,6 @@ const TS_QUERY: &str = r#"
 
 (function_expression
   name: (identifier) @fn.name) @fn.def
-
-(arrow_function
-  body: (statement_block) @fn.name) @fn.def
 
 (generator_function_declaration
   name: (identifier) @fn.name) @fn.def
