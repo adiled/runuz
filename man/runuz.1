@@ -350,6 +350,10 @@ runuz replace --file-path main.rs \\
         --symbol alpha.body \\
         --new-source '{ 42 }'
 
+# Pin an occurrence with #N in the walk order
+runuz replace --file-path main.rs \\
+        --symbol main.call#2 --new-source 'handle()'
+
 # Delete two definitions in one atomic edit
 runuz delete --file-path main.rs --symbols dead_one,dead_two
 
