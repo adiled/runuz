@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::ast;
+use crate::tools::text as text_scope;
 
 const MAX_DEPTH: usize = 8;
 const STUDY_PREAMBLE_LINES: usize = 30;
@@ -42,6 +43,50 @@ pub async fn run(args: Value) -> ToolResult {
 
     if args.file_path.is_empty() {
         return ToolResult::error("file_path is required");
+    }
+
+    if let Some(symbol) = args.symbol.as_deref() {
+        let single = {
+            let p = PathBuf::from(&args.file_path);
+            p.exists() && p.is_file()
+        };
+        match text_scope::classify(symbol) {
+            text_scope::Address::Shape(scope, text) => {
+                if !single {
+                    return ToolResult::error(format!(
+                        "No files resolved from '{}'. Check the path.", args.file_path
+                    ));
+                }
+                let p = PathBuf::from(&args.file_path);
+                let original = match fs::read_to_string(&p) {
+                    Ok(s) => s,
+                    Err(e) => return ToolResult::error(format!("read failed: {e}")),
+                };
+                let (start, end) = match text_scope::resolve(&original, &p, scope, text) {
+                    Some(r) => r,
+                    None => return ToolResult::error(format!(
+                        "{} '{text}' not found in {}. Read the file first to see its content.",
+                        scope.tag(), p.display()
+                    )),
+                };
+                return read_range(&p, scope.tag(), text, &original, start, end);
+            }
+            text_scope::Address::Name(name) if single && ast::detect_language(&PathBuf::from(&args.file_path)).is_none() => {
+                let p = PathBuf::from(&args.file_path);
+                let original = match fs::read_to_string(&p) {
+                    Ok(s) => s,
+                    Err(e) => return ToolResult::error(format!("read failed: {e}")),
+                };
+                let idx = match original.find(name) {
+                    Some(i) => i,
+                    None => return ToolResult::error(format!(
+                        "'{name}' not found in {}.", p.display()
+                    )),
+                };
+                return read_range(&p, "symbol", name, &original, idx, idx + name.len());
+            }
+            _ => {}
+        }
     }
 
     let targets = resolve_targets(&args.file_path);
@@ -335,6 +380,17 @@ fn read_by_pattern(targets: &[PathBuf], pattern: &str) -> ToolResult {
     }
 }
 
+fn read_range(path: &Path, tag: &str, label: &str, original: &str, start: usize, end: usize) -> ToolResult {
+    let snippet = text_scope::window(original, start, end, 1);
+    let bare = &original[start..end];
+    ToolResult {
+        output: format!("=== {} - '{} {}' ===\n\n{}", path.display(), tag, label, snippet),
+        title: Some(format!("{} '{} {}'", path.display(), tag, label)),
+        metadata: Some(json!({ "scope": tag, "bytes": bare.len() })),
+        is_error: false,
+    }
+}
+
 fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
     let mut out = String::new();
     let mut matches = 0usize;
@@ -446,8 +502,12 @@ fn safe_line_count(p: &Path) -> usize {
     fs::read_to_string(p).map(|s| s.lines().count()).unwrap_or(0)
 }
 
+#[cfg(test)]
 mod tests {
+    #[cfg_attr(not(test), allow(unused_imports))]
     use super::*;
+    use super::is_glob;
+    use super::seg_to_regex;
 
     #[test]
     fn is_glob_detects_star_question() {

@@ -268,43 +268,52 @@ fn delete_ignores_unrelated_preexisting_error() {
     assert!(!content.contains("PRODUCT_NAME"), "PRODUCT_NAME gone: {content}");
 }
 
-// ── word / phrase / sentence / paragraph ─────────────────────────────
+// ── scope (token / slot / statement / block) ──────────────────────────
 
 #[test]
-fn word_swap() {
+fn token_scope_swap() {
     let f = tmp_file("hello world\n", "txt");
-    let (ok, stdout, _) = runuz(&["word", "world", "--file-path", f.path().to_str().unwrap(), "--replace", "universe"]);
-    assert!(ok, "word swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "token world", "--new-source", "universe"]);
+    assert!(ok, "token swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
-    assert!(content.contains("universe"), "should swap word: {content}");
+    assert!(content.contains("universe"), "should swap token: {content}");
 }
 
 #[test]
-fn phrase_swap_in_markdown() {
+fn markdown_slot_swap() {
     let f = tmp_file("# Old Title\n\nSome content.\n", "md");
-    let (ok, stdout, _) = runuz(&["phrase", "Old Title", "--file-path", f.path().to_str().unwrap(), "--replace", "New Title"]);
-    assert!(ok, "phrase swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot # Old Title", "--new-source", "# New Title"]);
+    assert!(ok, "slot swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
-    assert!(content.contains("New Title"), "should swap phrase: {content}");
+    assert!(content.contains("# New Title"), "should swap heading: {content}");
 }
 
 #[test]
-fn sentence_swap() {
+fn statement_scope_swap() {
     let f = tmp_file("First line.\nSecond line.\n", "txt");
-    let (ok, stdout, _) = runuz(&["sentence", "Second line.", "--file-path", f.path().to_str().unwrap(), "--replace", "Replaced line."]);
-    assert!(ok, "sentence swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "statement Second line.", "--new-source", "Replaced line."]);
+    assert!(ok, "statement swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
-    assert!(content.contains("Replaced line."), "should swap sentence: {content}");
+    assert!(content.contains("Replaced line."), "should swap statement: {content}");
 }
 
 #[test]
-fn paragraph_delete() {
+fn block_scope_delete() {
     let f = tmp_file("First paragraph.\n\nSecond paragraph.\n", "txt");
-    let (ok, stdout, _) = runuz(&["paragraph", "First paragraph.", "--file-path", f.path().to_str().unwrap()]);
-    assert!(ok, "paragraph delete should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["delete", "--file-path", f.path().to_str().unwrap(), "--symbol", "block First paragraph."]);
+    assert!(ok, "block delete should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
     assert!(!content.contains("First paragraph"), "first gone: {content}");
     assert!(content.contains("Second paragraph"), "second kept: {content}");
+}
+
+#[test]
+fn scope_read_returns_range() {
+    let f = tmp_file("DB_HOST=localhost\nDB_PORT=5432\n", "env");
+    let (ok, stdout, _) = runuz(&["read", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot DB_HOST"]);
+    assert!(ok, "scope read should succeed: {stdout}");
+    assert!(stdout.contains("localhost"), "should show the range: {stdout}");
+    assert!(stdout.contains("DB_HOST"), "should show title: {stdout}");
 }
 
 // ── tools ─────────────────────────────────────────────────────────────
@@ -317,6 +326,10 @@ fn tools_lists_surface() {
     assert!(stdout.contains("runuz_create"), "should list create: {stdout}");
     assert!(stdout.contains("runuz_replace"), "should list replace: {stdout}");
     assert!(!stdout.contains("runuz_write"), "should NOT list write: {stdout}");
+    assert!(!stdout.contains("runuz_word"), "should NOT list word: {stdout}");
+    assert!(!stdout.contains("runuz_phrase"), "should NOT list phrase: {stdout}");
+    assert!(!stdout.contains("runuz_sentence"), "should NOT list sentence: {stdout}");
+    assert!(!stdout.contains("runuz_paragraph"), "should NOT list paragraph: {stdout}");
 }
 
 #[test]
@@ -343,19 +356,19 @@ fn missing_file_path_errors() {
 }
 
 #[test]
-fn non_code_file_rejected_by_code_ops() {
-    let f = tmp_file("# hello\n", "md");
-    let (ok, _, stderr) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--new-source", "# bye\n"]);
-    assert!(!ok, "replace on non-code should fail");
-    assert!(stderr.contains("runuz_text") || stderr.contains("code files only"), "should mention routing: {stderr}");
-}
+fn shape_on_code_renames_and_reparses() {
+    let f = tmp_file("fn alpha() {}\nfn beta() {}\n", "rs");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "token alpha", "--new-source", "gamma"]);
+    assert!(ok, "shape on code should succeed: {stdout}");
+    let content = std::fs::read_to_string(f.path()).unwrap();
+    assert!(content.contains("fn gamma"), "token renamed: {content}");
+    assert!(content.contains("fn beta"), "beta kept: {content}");
 
-#[test]
-fn code_file_rejected_by_text_ops() {
-    let f = tmp_file("fn alpha() {}\n", "rs");
-    let (ok, _, stderr) = runuz(&["word", "alpha", "--file-path", f.path().to_str().unwrap(), "--replace", "beta"]);
-    assert!(!ok, "word on code file should fail");
-    assert!(stderr.contains("runuz_code") || stderr.contains("refuses"), "should mention routing: {stderr}");
+    // shape edits on code are re-parsed: broken result must abort, file untouched
+    let (ok, _, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "statement fn gamma", "--new-source", "not rust (("]);
+    assert!(!ok, "broken shape edit on code must fail");
+    let content = std::fs::read_to_string(f.path()).unwrap();
+    assert!(content.contains("fn gamma"), "file untouched after rejected edit: {content}");
 }
 
 // ── json output mode ──────────────────────────────────────────────────
@@ -585,42 +598,52 @@ fn javascript_file_operations() {
 // ── non-code file operations ──────────────────────────────────────────
 
 #[test]
-fn json_file_phrase_swap() {
+fn json_slot_swap() {
     let f = tmp_file("{\"name\": \"old_name\", \"version\": \"1.0.0\"}\n", "json");
-    let (ok, stdout, _) = runuz(&["phrase", "old_name", "--file-path", f.path().to_str().unwrap(), "--replace", "\"new_name\""]);
-    assert!(ok, "json phrase swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot name", "--new-source", "\"new_name\""]);
+    assert!(ok, "json slot swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
     assert!(content.contains("new_name"), "should swap name: {content}");
     assert!(content.contains("1.0.0"), "should keep version: {content}");
 }
 
 #[test]
-fn toml_file_phrase_swap() {
+fn toml_slot_swap() {
     let f = tmp_file("[package]\nname = \"old_name\"\nversion = \"1.0.0\"\n", "toml");
-    let (ok, stdout, _) = runuz(&["phrase", "old_name", "--file-path", f.path().to_str().unwrap(), "--replace", "new_name"]);
-    assert!(ok, "toml phrase swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot name", "--new-source", "\"new_name\""]);
+    assert!(ok, "toml slot swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
     assert!(content.contains("new_name"), "should swap name: {content}");
+    assert!(content.contains("version"), "should keep version: {content}");
 }
 
 #[test]
-fn env_file_word_swap() {
+fn env_slot_swap() {
     let f = tmp_file("DB_HOST=localhost\nDB_PORT=5432\n", "env");
-    let (ok, stdout, _) = runuz(&["word", "localhost", "--file-path", f.path().to_str().unwrap(), "--replace", "production-db"]);
-    assert!(ok, "env word swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot DB_HOST", "--new-source", "production-db"]);
+    assert!(ok, "env slot swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
     assert!(content.contains("production-db"), "should swap host: {content}");
     assert!(content.contains("DB_PORT"), "should keep port: {content}");
 }
 
 #[test]
-fn markdown_heading_phrase_swap() {
+fn markdown_section_slot_swap() {
     let f = tmp_file("# Old Title\n\n## Section 1\n\nContent here.\n", "md");
-    let (ok, stdout, _) = runuz(&["phrase", "Old Title", "--file-path", f.path().to_str().unwrap(), "--replace", "New Title"]);
-    assert!(ok, "markdown phrase swap should succeed: {stdout}");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "slot ## Section 1", "--new-source", "## Renamed Section"]);
+    assert!(ok, "markdown slot swap should succeed: {stdout}");
     let content = std::fs::read_to_string(f.path()).unwrap();
-    assert!(content.contains("New Title"), "should swap title: {content}");
-    assert!(content.contains("Section 1"), "should keep section: {content}");
+    assert!(content.contains("Renamed Section"), "should swap section: {content}");
+    assert!(content.contains("Old Title"), "should keep title: {content}");
+}
+
+#[test]
+fn whole_file_replace_on_non_code() {
+    let f = tmp_file("old body\n", "txt");
+    let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--new-source", "new body\n"]);
+    assert!(ok, "whole-file replace should succeed on text: {stdout}");
+    let content = std::fs::read_to_string(f.path()).unwrap();
+    assert_eq!(content, "new body\n", "whole file replaced: {content}");
 }
 
 // ── error recovery ────────────────────────────────────────────────────

@@ -1,17 +1,3 @@
-//! Command-line parsing for the runuz binary - a small hand-rolled
-//! parser (no clap dependency; keeps the standalone crate lean).
-//!
-//! The tool *operations* are TOP-LEVEL subcommands so they're
-//! discoverable and impossible to forget:
-//!
-//!   code ops:  runuz create | replace | insert_before | insert_after | delete
-//!   text scopes: runuz word | phrase | sentence | paragraph
-//!   reading:  runuz read
-//!
-//! Each op takes its target as the FIRST positional arg after the
-//! subcommand (where applicable), then `--file-path` (required) and
-//! op-specific flags.
-
 use anyhow::{bail, Result};
 
 #[derive(Debug)]
@@ -28,7 +14,6 @@ pub enum Command {
     Insert(InsertArgs),
     Delete(DeleteArgs),
     Rename(RenameArgs),
-    DoNonCode(DoNonCodeArgs),
     Tools,
 }
 
@@ -58,7 +43,7 @@ pub struct ReplaceArgs {
 pub struct InsertArgs {
     pub file_path: String,
     pub anchor: String,
-    pub symbol: String,
+    pub symbol: Option<String>,
     pub new_source: Option<String>,
 }
 
@@ -74,14 +59,6 @@ pub struct RenameArgs {
     pub file_path: String,
     pub symbol: Option<String>,
     pub new_name: Option<String>,
-}
-
-#[derive(Debug)]
-pub struct DoNonCodeArgs {
-    pub file_path: String,
-    pub scope: String,
-    pub scope_text: String,
-    pub replace: Option<String>,
 }
 
 impl Args {
@@ -105,7 +82,6 @@ impl Args {
         let sub = sub.ok_or_else(|| anyhow::anyhow!("missing subcommand"))?;
 
         let mut pairs: Vec<(String, String)> = Vec::new();
-        let mut rest: Vec<String> = Vec::new();
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--json" => json = true,
@@ -117,7 +93,7 @@ impl Args {
                             .ok_or_else(|| anyhow::anyhow!("flag {a} needs a value"))?;
                         pairs.push((key.to_string(), val));
                     } else {
-                        rest.push(a);
+                        bail!("unexpected positional argument {a:?} - runuz takes flags only");
                     }
                 }
             }
@@ -131,10 +107,8 @@ impl Args {
             "insert_after"  => Command::Insert(insert_args(&pairs, "after")?),
             "delete" => Command::Delete(delete_args(&pairs)?),
             "rename" => Command::Rename(rename_args(&pairs)?),
-            "word" | "phrase" | "sentence" | "paragraph" =>
-                Command::DoNonCode(do_nocode_args(&pairs, &rest, &sub)?),
             "tools" => Command::Tools,
-            other => bail!("unknown subcommand {other:?} - use read, create, replace, insert_before, insert_after, delete, rename, word, phrase, sentence, or paragraph"),
+            other => bail!("unknown subcommand {other:?} - use read, create, replace, insert_before, insert_after, delete, rename, or tools"),
         };
         Ok(Args { cmd, json })
     }
@@ -148,6 +122,15 @@ fn req<'a>(pairs: &'a [(String, String)], key: &str) -> Result<&'a str> {
 
 fn opt<'a>(pairs: &'a [(String, String)], key: &str) -> Option<String> {
     pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
+
+fn addr_flags(pairs: &[(String, String)]) -> Result<(Option<String>, Option<String>)> {
+    let symbol = opt(pairs, "symbol");
+    let symbols = opt(pairs, "symbols");
+    if symbol.is_some() && symbols.is_some() {
+        bail!("give exactly one of --symbol, --symbols");
+    }
+    Ok((symbol, symbols))
 }
 
 fn read_args(pairs: &[(String, String)]) -> Result<ReadArgs> {
@@ -173,30 +156,50 @@ fn replace_args(pairs: &[(String, String)]) -> Result<ReplaceArgs> {
             bail!("unknown flag --{k} for replace. Allowed: --file-path, --symbol, --symbols, --new-source");
         }
     }
+    let (symbol, symbols) = addr_flags(pairs)?;
     Ok(ReplaceArgs {
         file_path: req(pairs, "file-path")?.to_string(),
-        symbol: opt(pairs, "symbol"),
-        symbols: opt(pairs, "symbols"),
+        symbol,
+        symbols,
         new_source: opt(pairs, "new-source"),
     })
 }
 
 fn insert_args(pairs: &[(String, String)], anchor: &str) -> Result<InsertArgs> {
+    for (k, _) in pairs {
+        if !["file-path", "symbol", "new-source"].contains(&k.as_str()) {
+            bail!("unknown flag --{k} for insert_{anchor}. Allowed: --file-path, --symbol, --new-source");
+        }
+    }
+    let symbol = opt(pairs, "symbol");
+    if symbol.is_none() {
+        bail!("insert_{anchor} needs an anchor: --symbol NAME or --symbol 'rung <text>'");
+    }
     Ok(InsertArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         anchor: anchor.to_string(),
-        symbol: req(pairs, "symbol")?.to_string(),
+        symbol,
         new_source: opt(pairs, "new-source"),
     })
 }
 
 fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
+    for (k, _) in pairs {
+        if !["file-path", "symbol", "symbols"].contains(&k.as_str()) {
+            bail!("unknown flag --{k} for delete. Allowed: --file-path, --symbol, --symbols");
+        }
+    }
+    let (symbol, symbols) = addr_flags(pairs)?;
+    if symbol.is_none() && symbols.is_none() {
+        bail!("delete needs a target: --symbol S or --symbols A,B");
+    }
     Ok(DeleteArgs {
         file_path: req(pairs, "file-path")?.to_string(),
-        symbol: opt(pairs, "symbol"),
-        symbols: opt(pairs, "symbols"),
+        symbol,
+        symbols,
     })
 }
+
 fn rename_args(pairs: &[(String, String)]) -> Result<RenameArgs> {
     Ok(RenameArgs {
         file_path: req(pairs, "file-path")?.to_string(),
@@ -205,43 +208,34 @@ fn rename_args(pairs: &[(String, String)]) -> Result<RenameArgs> {
     })
 }
 
-
-fn do_nocode_args(pairs: &[(String, String)], rest: &[String], scope: &str) -> Result<DoNonCodeArgs> {
-    Ok(DoNonCodeArgs {
-        file_path: req(pairs, "file-path")?.to_string(),
-        scope: scope.to_string(),
-        scope_text: rest.first().cloned().unwrap_or_default(),
-        replace: opt(pairs, "replace"),
-    })
-}
-
 fn help() {
     println!(r#"runuz - the standalone filesystem CLI
 
 USAGE:
-  runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
+  runuz read --file-path <path> [--symbol ADDR] [--query Q] [--pattern RE]
   runuz create  --file-path <path> [--new-source T]
-  runuz replace --file-path <path> [--symbol S | --symbols A,B] [--new-source T]
-  runuz insert_before --file-path <path> --symbol S [--new-source T]
-  runuz insert_after  --file-path <path> --symbol S [--new-source T]
-  runuz delete --file-path <path> --symbol S | --symbols A,B
-  runuz word <scope-text> --file-path <path> [--replace T]
-  runuz phrase <scope-text> --file-path <path> [--replace T]
-  runuz sentence <scope-text> --file-path <path> [--replace T]
-  runuz paragraph <scope-text> --file-path <path> [--replace T]
+  runuz replace --file-path <path> [--symbol ADDR | --symbols A,B] [--new-source T]
+  runuz insert_before --file-path <path> --symbol ADDR [--new-source T]
+  runuz insert_after  --file-path <path> --symbol ADDR [--new-source T]
+  runuz delete --file-path <path> (--symbol ADDR | --symbols A,B)
+  runuz rename --file-path <path> --symbol NAME --new-name Y
   runuz tools [--json]                      (advertised tool surface)
 
-All tool OPERATIONS are TOP-LEVEL subcommands:
-  create        new file (fails if it exists)
-  replace       symbol-scoped (or --symbols A,B for a contiguous run), whole-file when --symbol omitted
-  insert_before / insert_after   splice new_source at the anchor symbol
-  delete        drop the anchor symbol's byte range (or --symbols A,B for a contiguous run)
-  word / phrase / sentence / paragraph   linguistic scopes (omit
-                --replace to delete the resolved scope)
+--symbol addresses ANY unit of ANY file, one grammar:
 
---symbol accepts dot-nested (e.g. 'Class.method'); 'imports' addresses
-the synthetic top-of-file import block. --json anywhere for
-machine-readable output.
+  NAME              the named unit (code): fn/Class.method/imports,
+                    sub-walks 'alpha.body', 'alpha.when.otherwise#2'
+  'token <t>'       the first word-boundary occurrence of <t>
+  'slot <s>'        the named value: JSON key-path, YAML/TOML/env key,
+                    markdown heading; falls back to exact substring
+  'statement <s>'   the line containing <s>
+  'block <s>'       the blank-line paragraph containing <s>
+
+Code files validate against their grammar; text files validate
+structure (JSON stays JSON). No address on replace = whole file.
+'symbols A,B' = one atomic multi-edit over code symbols.
+Empty --new-source deletes the addressed range. --json anywhere
+for machine-readable output.
 "#);
 }
 

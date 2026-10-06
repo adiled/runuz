@@ -1,28 +1,7 @@
-//! `runuz_do_code` — AST-grounded code authoring.
-//!
-//! Operations:
-//!
-//! - `create` — new file. Refuses if the path exists. Validates
-//!   syntax against the language's tree-sitter parser before write.
-//! - `replace` — symbol-scoped or whole-file. With `symbol`, the
-//!   target symbol's byte range is spliced for `new_source`; without
-//!   `symbol`, the entire file is rewritten. Either way the result
-//!   is re-parsed; a syntax-error result aborts the write.
-//! - `insert_before` / `insert_after` — splice `new_source` at the
-//!   start (resp. end) of the anchor symbol's byte range, with a
-//!   newline separator so the new code lands on its own line.
-//! - `delete` — drop the anchor symbol's byte range. If the symbol
-//!   sat alone on indented lines, drops the surrounding blank
-//!   lines too.
-//!
-//! Non-code extensions are routed back to `runuz_do_noncode`. The
-//! synthetic `imports` symbol covers the leading contiguous run of
-//! import / use / include / require nodes at top level — addressable
-//! via `symbol: "imports"` on any of the above operations except
-//! `create`.
-
 use std::path::{Path, PathBuf};
 
+use crate::io::{atomic_write, ok, splice};
+use crate::tools::text as text_scope;
 use crate::{ToolDef, ToolResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -49,16 +28,17 @@ fn default_op() -> String { "replace".into() }
 #[allow(dead_code)]
 pub(crate) fn def() -> ToolDef {
     ToolDef {
-        name: "runuz_do_code".into(),
-        description: "Author code — AST-grounded, symbol-scoped. Operations: create | replace (symbol OR whole-file OR symbols-list) | insert_before | insert_after | delete. The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N (P6). Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs (AST-backed today). Every write is re-parsed; a syntax-error result aborts the write. Non-code files route to runuz_do_noncode.".into(),
+        name: "runuz_code".into(),
+        description: "Author files: create | replace | insert_before | insert_after | delete | rename. Every unit of the file is addressable by --symbol. A name (fn/Class.method/imports, dot-nested sub-walks body/when/otherwise/loop/try/return/call, #N disambiguation) or a shape rung ('token <t>' | 'slot <s>' | 'statement <s>' | 'block <s>'). Slot is format-aware (JSON key-path, YAML/TOML/env key, markdown heading) with exact-substring fallback. A plain name on a non-code file finds its exact text. No symbol means a whole-file replace. Every code write is re-parsed; a syntax-error result aborts the write. Text writes validate structure (JSON stays JSON).".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "file_path":  { "type": "string", "description": "Absolute path to the code file. Must have a code extension." },
-                "operation":  { "type": "string", "description": "One of: create, replace, insert_before, insert_after, delete. Default: replace." },
-                "symbol":     { "type": "string", "description": "Target symbol name. Required for replace (unless whole-file rewrite), insert_before, insert_after, delete. Dot-separated for nested (e.g. 'Class.method'). Use 'imports' for the synthetic import-block symbol." },
-                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names to replace/delete in one atomic write — contiguous OR non-contiguous (each symbol's own range is spliced). Resolved against the same file; any missing name aborts with no partial edit. E.g. 'Hid,HidPrefix,HidParseError'. Alternative to 'symbol' for multi-item blocks." },
-                "new_source": { "type": "string", "description": "The new source code. Required for create, replace, insert_before, insert_after." },
+                "file_path":  { "type": "string", "description": "Absolute path to the file." },
+                "operation":  { "type": "string", "description": "One of: create, replace, insert_before, insert_after, delete, rename. Default: replace." },
+                "symbol":     { "type": "string", "description": "Address of the unit to edit: a symbol NAME (code files; dot-separated 'Class.method', sub-walks 'alpha.body', 'alpha.when.otherwise#2', synthetic 'imports') or a shape rung 'token <t>' / 'slot <s>' / 'statement <s>' / 'block <s>' (rungs resolve by shape on any file; slot is format-aware and falls back to exact substring). On non-code files, a bare name resolves as its exact text." },
+                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names for one atomic replace/delete, contiguous or not. Any missing name aborts with no partial edit." },
+                "new_source": { "type": "string", "description": "The new source. Required for create/replace/insert. Empty string deletes the addressed range." },
+                "new_name":   { "type": "string", "description": "Rename target (operation rename)." },
             },
             "required": ["file_path"],
         }),
@@ -71,30 +51,173 @@ pub async fn run(args: Value) -> ToolResult {
         Err(e) => return ToolResult::error(format!("invalid args: {e}")),
     };
     let path = PathBuf::from(&args.file_path);
-    let lang = match ast::detect_language(&path) {
-        Some(l) => l,
-        None => return ToolResult::error(format!(
-            "runuz_code targets code files only. '{}' has no recognized code extension - route to runuz_text.",
-            path.display()
-        )),
-    };
 
-    match args.operation.as_str() {
-        "create" => op_create(&path, lang, args.new_source.as_deref()),
-        "replace" => op_replace(&path, lang, args.symbol.as_deref(), args.symbols.as_deref(), args.new_source.as_deref()),
-        "insert_before" => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::Before),
-        "insert_after"  => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::After),
-        "delete" => op_delete(&path, lang, args.symbol.as_deref(), args.symbols.as_deref()),
-        "rename" => op_rename(&path, lang, args.symbol.as_deref(), args.new_name.as_deref()),
-        other => ToolResult::error(format!(
-            "unknown operation '{other}' - pick one of: create, replace, insert_before, insert_after, delete, rename"
-        )),
+    if args.operation == "create" {
+        return op_create(&path, ast::detect_language(&path), args.new_source.as_deref());
+    }
+
+    let lang = ast::detect_language(&path);
+    let address = args.symbol.as_deref().map(text_scope::classify);
+
+    match address {
+        Some(text_scope::Address::Shape(scope, text)) => {
+            shape_op(&path, lang, &args.operation, scope, text, args.new_source.as_deref())
+        }
+        Some(text_scope::Address::Name(name)) => {
+            name_op(&path, lang, &args.operation, Some(name), args.symbols.as_deref(),
+                    args.new_source.as_deref(), args.new_name.as_deref())
+        }
+        None => name_op(&path, lang, &args.operation, None, args.symbols.as_deref(),
+                        args.new_source.as_deref(), args.new_name.as_deref()),
     }
 }
 
-// ── ops ──────────────────────────────────────────────────────────────────
+fn shape_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, scope: text_scope::TextScope, text: &str,
+    new_source: Option<&str>,
+) -> ToolResult {
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
+    };
+    let (start, end) = match text_scope::resolve(&original, path, scope, text) {
+        Some(r) => r,
+        None => return ToolResult::error(format!(
+            "{} '{text}' not found in {}. Read the file first to see its content.",
+            scope.tag(), path.display()
+        )),
+    };
+    text_op(path, lang, operation, scope.tag(), text, start, end, new_source)
+}
 
-fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResult {
+fn name_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, name: Option<&str>, symbols: Option<&str>,
+    new_source: Option<&str>, new_name: Option<&str>,
+) -> ToolResult {
+    if operation == "rename" {
+        return match name {
+            Some(n) => op_rename(path, lang, Some(n), new_name),
+            None => ToolResult::error("rename needs --symbol (the name to rename)"),
+        };
+    }
+    if let Some(list) = symbols {
+        let l = match lang {
+            Some(l) => l,
+            None => return ToolResult::error("--symbols (multi) needs a code file. Use a single --symbol on text."),
+        };
+        return match operation {
+            "replace" => op_replace(path, l, name, Some(list), new_source),
+            "delete" => op_delete(path, l, name, Some(list)),
+            other => ToolResult::error(format!(
+                "operation '{other}' does not take --symbols (only replace and delete do)"
+            )),
+        };
+    }
+    let name = match name {
+        Some(n) => n,
+        None => {
+            if operation == "replace" {
+                return match lang {
+                    Some(l) => op_replace(path, l, None, None, new_source),
+                    None => whole_file_text_replace(path, new_source),
+                };
+            }
+            return ToolResult::error(format!(
+                "{} needs an address: --symbol NAME or --symbol 'rung <text>'.",
+                operation
+            ));
+        }
+    };
+    match lang {
+        Some(l) => match operation {
+            "replace" => op_replace(path, l, Some(name), None, new_source),
+            "insert_before" => op_insert(path, l, Some(name), new_source, Anchor::Before),
+            "insert_after"  => op_insert(path, l, Some(name), new_source, Anchor::After),
+            "delete" => op_delete(path, l, Some(name), None),
+            "rename" => unreachable!(),
+            other => ToolResult::error(format!(
+                "unknown operation '{other}' - pick one of: create, replace, insert_before, insert_after, delete, rename"
+            )),
+        },
+        None => {
+            let original = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return ToolResult::error(format!("read failed: {e}")),
+            };
+            let idx = match original.find(name) {
+                Some(i) => i,
+                None => return ToolResult::error(format!(
+                    "'{name}' not found in {}. Read the file first to see its content.",
+                    path.display()
+                )),
+            };
+            text_op(path, None, operation, "symbol", name, idx, idx + name.len(), new_source)
+        }
+    }
+}
+
+fn text_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, tag: &str, label: &str,
+    start: usize, end: usize, new_source: Option<&str>,
+) -> ToolResult {
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
+    };
+    let (updated, action) = match operation {
+        "replace" => {
+            let src = match new_source {
+                Some(s) => s,
+                None => return ToolResult::error("replace needs new_source"),
+            };
+            (splice(&original, start, end, src), if src.is_empty() { "Deleted" } else { "Replaced" })
+        }
+        "insert_before" => {
+            let src = match new_source {
+                Some(s) => s,
+                None => return ToolResult::error("insert needs new_source"),
+            };
+            (splice(&original, start, start, src), "Inserted")
+        }
+        "insert_after" => {
+            let src = match new_source {
+                Some(s) => s,
+                None => return ToolResult::error("insert needs new_source"),
+            };
+            (splice(&original, end, end, src), "Inserted")
+        }
+        "delete" => (splice(&original, start, end, ""), "Deleted"),
+        other => return ToolResult::error(format!(
+            "operation '{other}' cannot be addressed. Use create/rename for files, or replace/insert_before/insert_after/delete for units"
+        )),
+    };
+    match lang {
+        Some(l) => {
+            if let Err(msg) = ast::validate_edited(&original, &updated, l, &[(start, end)]) {
+                return ToolResult::error(format!(
+                    "rejected - result has {msg}; original left untouched"
+                ));
+            }
+        }
+        None => {
+            if let Err(msg) = text_scope::validate_structure(path, &original, &updated) {
+                return ToolResult::error(format!(
+                    "edit would corrupt {} - {msg}. File NOT modified; fix your replacement and try again.",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if let Err(e) = atomic_write(path, &updated) {
+        return ToolResult::error(format!("write failed: {e}"));
+    }
+    ok(
+        format!("{action} {tag} '{label}' in {} ({} bytes)", path.display(), updated.len()),
+        path,
+    )
+}
+
+fn op_create(path: &Path, lang: Option<LangSpec>, new_source: Option<&str>) -> ToolResult {
     let src = match new_source {
         Some(s) => s,
         None => return ToolResult::error("create needs new_source"),
@@ -105,8 +228,10 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
             path.display()
         ));
     }
-    if let Err(msg) = ast::validate_syntax(src, lang) {
-        return ToolResult::error(format!("rejected - new_source has {msg}"));
+    if let Some(l) = lang {
+        if let Err(msg) = ast::validate_syntax(src, l) {
+            return ToolResult::error(format!("rejected - new_source has {msg}"));
+        }
     }
     if let Some(parent) = path.parent() {
         if !parent.exists() {
@@ -119,6 +244,27 @@ fn op_create(path: &Path, lang: LangSpec, new_source: Option<&str>) -> ToolResul
         return ToolResult::error(format!("write failed: {e}"));
     }
     ok(format!("Created {} ({} bytes)", path.display(), src.len()), path)
+}
+
+fn whole_file_text_replace(path: &Path, new_source: Option<&str>) -> ToolResult {
+    let new = match new_source {
+        Some(s) => s.to_string(),
+        None => return ToolResult::error("replace needs new_source"),
+    };
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
+    };
+    if let Err(msg) = text_scope::validate_structure(path, &original, &new) {
+        return ToolResult::error(format!(
+            "edit would corrupt {} - {msg}. File NOT modified; fix your replacement and try again.",
+            path.display()
+        ));
+    }
+    if let Err(e) = atomic_write(path, &new) {
+        return ToolResult::error(format!("write failed: {e}"));
+    }
+    ok(format!("Replaced whole file in {} ({} bytes)", path.display(), new.len()), path)
 }
 
 fn op_replace(
@@ -244,14 +390,8 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
     ok(format!("Deleted {what} from {}", path.display()), path)
 }
 
-// ── symbol resolution ───────────────────────────────────────────────────
-
-/// Locate the named symbol in `source`. Supports plain names,
-/// dot-nested ("Class.method"), sub-symbol alias walks
-/// ("alpha.body", "alpha.when.otherwise"), and the synthetic
-/// `imports` symbol.
 fn op_rename(
-    path: &Path, lang: LangSpec, symbol: Option<&str>, new_name: Option<&str>,
+    path: &Path, lang: Option<LangSpec>, symbol: Option<&str>, new_name: Option<&str>,
 ) -> ToolResult {
     let sym_name = match symbol {
         Some(s) => s,
@@ -265,7 +405,27 @@ fn op_rename(
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let tree = match ast::parse(&original, lang) {
+    let l = match lang {
+        Some(l) => l,
+        None => {
+            let re = match regex::Regex::new(&format!(r"\b{}\b", regex::escape(sym_name))) {
+                Ok(r) => r,
+                Err(e) => return ToolResult::error(format!("bad rename target: {e}")),
+            };
+            if !re.is_match(&original) {
+                return ToolResult::error(format!("'{sym_name}' not found in {}", path.display()));
+            }
+            let updated = re.replace_all(&original, replacement).into_owned();
+            if let Err(e) = atomic_write(path, &updated) {
+                return ToolResult::error(format!("write failed: {e}"));
+            }
+            return ok(
+                format!("Renamed '{sym_name}' to '{replacement}' in {} (text, word-boundary)", path.display()),
+                path,
+            );
+        }
+    };
+    let tree = match ast::parse(&original, l) {
         Some(t) => t,
         None => return ToolResult::error("parser unavailable".to_string()),
     };
@@ -301,7 +461,7 @@ fn op_rename(
     for (s, e) in ranges.iter().rev() {
         updated.replace_range(*s..*e, replacement);
     }
-    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &ranges) {
+    if let Err(msg) = ast::validate_edited(&original, &updated, l, &ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
     if let Err(e) = atomic_write(path, &updated) {
@@ -332,12 +492,12 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
         let name = name.trim();
         if name.is_empty() { continue; }
         let sym = match locate_symbol(source, lang, name) {
-            Err(e) => return Err(format!("{e} — no partial edit applied")),
+            Err(e) => return Err(format!("{e}. No partial edit applied")),
             Ok(s) => s,
         };
         out.push(sym);
     }
-    if out.is_empty() { return Err("symbols list is empty — nothing to edit".into()); }
+    if out.is_empty() { return Err("symbols list is empty; nothing to edit".into()); }
     out.sort_by_key(|s| s.start_byte);
     Ok(out)
 }
@@ -438,41 +598,6 @@ fn synthesize_imports(source: &str, lang: LangSpec) -> Option<Symbol> {
     })
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────
-
-fn splice(source: &str, start: usize, end: usize, with: &str) -> String {
-    let mut out = String::with_capacity(source.len() + with.len());
-    out.push_str(&source[..start]);
-    out.push_str(with);
-    out.push_str(&source[end..]);
-    out
-}
-fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
-    use std::os::unix::io::AsRawFd;
-    // Acquire advisory exclusive lock on the file
-    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).open(path)?;
-    let fd = f.as_raw_fd();
-    unsafe {
-        if libc::flock(fd, libc::LOCK_EX) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-    }
-    // Write to temp file, then atomic rename
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, content)?;
-    std::fs::rename(&tmp, path)?;
-    // Release lock
-    unsafe {
-        libc::flock(fd, libc::LOCK_UN);
-    }
-    Ok(())
-}
-
-
-/// Walk back to line start if everything between line-start and
-/// `index` is whitespace — so the splice point doesn't leave a half
-/// line of indentation. If the symbol shares its line with anything
-/// else (`def f(): pass; def g(): pass`), return `index` untouched.
 fn line_start_if_indented_alone(source: &str, index: usize) -> usize {
     let mut i = index;
     while i > 0 && &source[i - 1..i] != "\n" { i -= 1; }
@@ -483,19 +608,6 @@ fn line_start_if_indented_alone(source: &str, index: usize) -> usize {
     i
 }
 
-/// After deleting a symbol's line-range, extend the splice past its
-/// trailing newline(s) ONLY when the lines being eaten are surely blank.
-/// Rule: if the rest of the symbol's own line after `end_byte` holds any
-/// content (the symbol shared its line with a neighbour), never eat —
-/// we must not merge that neighbour up onto the deleted line. Otherwise
-/// the symbol's own line is blank after it, so we eat its newline plus
-/// any following blank (whitespace-only) lines, stopping before the
-/// first line that has content.
-
-/// Extend a delete end past a lone trailing `,`/`;` on the symbol's own
-/// line. Struct fields (whose AST range stops before the comma) would
-/// otherwise leave a dangling comma behind. Safe for any symbol: a
-/// lone terminator after a symbol's range is always decoration to drop.
 fn extend_field_terminator(source: &str, end: usize, _kind: SymbolKind) -> usize {
     let rest = &source[end..];
     let trimmed = rest.trim_start_matches([' ', '\t']);
@@ -512,7 +624,7 @@ fn maybe_eat_blank_line(source: &str, end: usize) -> usize {
     let mut j = end;
     while j < source.len() && &source[j..j + 1] != "\n" {
         let ch = &source[j..j + 1];
-        if ch != " " && ch != "\t" { return end; } // shared line — never eat
+        if ch != " " && ch != "\t" { return end; }
         j += 1;
     }
     if source.get(end..end + 1) != Some("\n") {
@@ -523,7 +635,7 @@ fn maybe_eat_blank_line(source: &str, end: usize) -> usize {
         let mut k = i;
         while k < source.len() && &source[k..k + 1] != "\n" {
             let ch = &source[k..k + 1];
-            if ch != " " && ch != "\t" { return i; } // content line — stop before it
+            if ch != " " && ch != "\t" { return i; }
             k += 1;
         }
         if k >= source.len() { return i; }
@@ -531,25 +643,15 @@ fn maybe_eat_blank_line(source: &str, end: usize) -> usize {
     }
 }
 
-fn ok(msg: String, path: &Path) -> ToolResult {
-    ToolResult {
-        output: msg,
-        title: Some(path.display().to_string()),
-        metadata: Some(json!({ "path": path.display().to_string() })),
-        is_error: false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     fn tmp(suffix: &str) -> PathBuf {
-        let n = SEQ.fetch_add(1, Ordering::SeqCst);
-        std::env::temp_dir().join(format!("runuz-do_code-{}-{}.{}", std::process::id(), n, suffix))
+        crate::io::tmp(&SEQ, "code", suffix)
     }
 
     #[tokio::test]
@@ -731,16 +833,107 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_non_code_extension() {
+    async fn plain_name_replace_on_text() {
         let p = tmp("md");
-        fs::write(&p, "# hi\n").unwrap();
+        fs::write(&p, "# heading\n\ntext about hello world\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "replace",
-            "new_source": "# bye\n",
+            "symbol": "hello",
+            "new_source": "salut",
         })).await;
-        assert!(res.is_error);
-        assert!(res.output.contains("runuz_text"), "wrong rejection: {}", res.output);
+        assert!(!res.is_error, "plain name on text should work: {}", res.output);
+        let s = fs::read_to_string(&p).unwrap();
+        assert!(s.contains("salut"), "swapped: {s}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn create_works_for_non_code() {
+        let p = tmp("json");
+        let _ = fs::remove_file(&p);
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "create",
+            "new_source": "{\"name\": \"x\"}\n",
+        })).await;
+        assert!(!res.is_error, "create failed: {}", res.output);
+        assert_eq!(fs::read_to_string(&p).unwrap(), "{\"name\": \"x\"}\n");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn shape_replace_on_text() {
+        let p = tmp("env");
+        fs::write(&p, "DB_HOST=localhost\nDB_PORT=5432\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "slot DB_HOST",
+            "new_source": "production-db",
+        })).await;
+        assert!(!res.is_error, "shape replace failed: {}", res.output);
+        let s = fs::read_to_string(&p).unwrap();
+        assert!(s.contains("DB_HOST=production-db"), "swapped: {s}");
+        assert!(s.contains("DB_PORT"), "kept: {s}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn shape_delete_leaves_rest() {
+        let p = tmp("md");
+        fs::write(&p, "# Old Title\n\n## Section\n\nContent here.\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "delete",
+            "symbol": "slot ## Section",
+        })).await;
+        assert!(!res.is_error, "shape delete failed: {}", res.output);
+        let s = fs::read_to_string(&p).unwrap();
+        assert!(!s.contains("## Section"), "section gone: {s}");
+        assert!(s.contains("# Old Title"), "title kept: {s}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn shape_edit_on_code_is_reparsed() {
+        let p = tmp("rs");
+        fs::write(&p, "fn alpha() {}\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "token alpha",
+            "new_source": "beta",
+        })).await;
+        assert!(!res.is_error, "shape edit on code should work: {}", res.output);
+        assert!(fs::read_to_string(&p).unwrap().contains("fn beta"),
+            "should have renamed: {}", fs::read_to_string(&p).unwrap());
+        let res_bad = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "statement fn beta",
+            "new_source": "this is not rust ((",
+        })).await;
+        assert!(res_bad.is_error, "broken shape edit on code must be rejected");
+        assert!(fs::read_to_string(&p).unwrap().contains("fn beta"),
+            "file untouched after rejected edit");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[tokio::test]
+    async fn shape_empty_string_deletes() {
+        let p = tmp("txt");
+        fs::write(&p, "host = localhost\nport = 3000\n").unwrap();
+        let res = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "token localhost",
+            "new_source": "",
+        })).await;
+        assert!(!res.is_error, "empty replace failed: {}", res.output);
+        let s = fs::read_to_string(&p).unwrap();
+        assert!(!s.contains("localhost"), "gone: {s}");
+        assert!(s.contains("port"), "kept: {s}");
         let _ = fs::remove_file(&p);
     }
 

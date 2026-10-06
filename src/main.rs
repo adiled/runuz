@@ -1,22 +1,3 @@
-//! runuz - the standalone filesystem CLI.
-//!
-//! `read`, the five code operations (`create`, `replace`,
-//! `insert_before`, `insert_after`, `delete`), and the four linguistic
-//! scopes (`word`, `phrase`, `sentence`, `paragraph`) for any project on
-//! Earth - AST-grounded via tree-sitter. All tool operations are
-//! top-level subcommands so they're discoverable and hard to forget.
-//!
-//!   runuz read --file-path <path> [--symbol S] [--query Q] [--pattern RE]
-//!   runuz create  --file-path <path> [--new-source T]
-//!   runuz replace --file-path <path> [--symbol S] [--new-source T]
-//!   runuz insert_before --file-path <path> --symbol S [--new-source T]
-//!   runuz insert_after  --file-path <path> --symbol S [--new-source T]
-//!   runuz delete --file-path <path> --symbol S
-//!   runuz word <scope> --file-path <path> [--replace T]
-//!   runuz phrase <scope> --file-path <path> [--replace T]
-//!   runuz sentence <scope> --file-path <path> [--replace T]
-//!   runuz paragraph <scope> --file-path <path> [--replace T]
-
 mod cli;
 
 use anyhow::Result;
@@ -103,16 +84,6 @@ async fn run() -> Result<ExitCode> {
                     println!("  {}", d.name);
                 }
             }
-        }
-        cli::Command::DoNonCode(c) => {
-            let mut args = serde_json::json!({
-                "file_path": c.file_path,
-            });
-            args[c.scope.clone()] = serde_json::json!(c.scope_text);
-            if let Some(v) = c.replace { args["replace"] = serde_json::json!(v); }
-            let res = runuz::tools::text(args).await;
-            if res.is_error { had_error = true; }
-            print_result(&res, json);
         }
     }
     if had_error {
