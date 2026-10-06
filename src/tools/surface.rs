@@ -22,89 +22,51 @@ pub struct SurfaceTool {
     pub props: &'static [&'static str],
     /// Properties that are required.
     pub required: &'static [&'static str],
-    /// True when the subcommand takes a positional scope value
-    /// (`word|phrase|sentence|paragraph`).
-    pub positional: bool,
 }
 
 /// The complete advertised surface, in CLI order.
 pub const SURFACE: &[SurfaceTool] = &[
     SurfaceTool {
         sub: "read",
-        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps) with per-symbol callees as a `→ name, name` suffix; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested — the ONE path that outputs a symbol's internal code, prefixed by its calls: line), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
-        props: &["file_path", "symbol", "query", "pattern"],
+        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps) with per-symbol callees as a `→ name, name` suffix; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested — the ONE path that outputs a symbol's internal code, prefixed by its calls: line), scope (address a text rung: 'token|slot|statement|block <text>' — outputs just that range), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
+        props: &["file_path", "symbol", "scope", "query", "pattern"],
         required: &["file_path"],
-        positional: false,
     },
     SurfaceTool {
         sub: "create",
-        description: "Create a new code file (fails if it exists). AST-grounded; the write is re-parsed and a syntax-error result aborts.",
+        description: "Create a new file (fails if it exists). Code files are re-parsed after write and a syntax-error result aborts; configs and docs are written as-is.",
         props: &["file_path", "new_source"],
         required: &["file_path"],
-        positional: false,
     },
     SurfaceTool {
         sub: "replace",
-        description: "Replace code - symbol-scoped, or whole-file when symbol is omitted. AST-grounded; every write is re-parsed and a syntax-error result aborts.",
-        props: &["file_path", "symbol", "symbols", "new_source"],
+        description: "Replace an addressed unit or the whole file (address omitted = whole file). Code is addressed by --symbol (or --symbols A,B for a multi-splice/contiguous run) and re-parsed on write; text files are addressed by --scope ('token|slot|statement|block <text>') with no re-parse. --new-source '' deletes the resolved range.",
+        props: &["file_path", "symbol", "symbols", "scope", "new_source"],
         required: &["file_path"],
-        positional: false,
     },
     SurfaceTool {
         sub: "insert_before",
-        description: "Splice new_source immediately before the anchor symbol. AST-grounded; re-parsed on write.",
-        props: &["file_path", "symbol", "new_source"],
-        required: &["file_path", "symbol"],
-        positional: false,
+        description: "Splice new_source immediately before the anchor. Code anchors by --symbol (re-parsed on write); text files anchor by --scope ('token|slot|statement|block <text>').",
+        props: &["file_path", "symbol", "scope", "new_source"],
+        required: &["file_path"],
     },
     SurfaceTool {
         sub: "insert_after",
-        description: "Splice new_source immediately after the anchor symbol. AST-grounded; re-parsed on write.",
-        props: &["file_path", "symbol", "new_source"],
-        required: &["file_path", "symbol"],
-        positional: false,
+        description: "Splice new_source immediately after the anchor. Code anchors by --symbol (re-parsed on write); text files anchor by --scope ('token|slot|statement|block <text>').",
+        props: &["file_path", "symbol", "scope", "new_source"],
+        required: &["file_path"],
     },
     SurfaceTool {
         sub: "delete",
-        description: "Delete the anchor symbol's byte range (or a --symbols contiguous run). AST-grounded; re-parsed on write.",
-        props: &["file_path", "symbol", "symbols"],
+        description: "Delete an addressed unit. Code: --symbol S or --symbols A,B (contiguous run, blank-line hygiene). Text: --scope 'token|slot|statement|block <text>'.",
+        props: &["file_path", "symbol", "symbols", "scope"],
         required: &["file_path"],
-        positional: false,
     },
     SurfaceTool {
         sub: "rename",
-        description: "Rename a symbol (function, struct, etc.) across the file. Finds all word-boundary occurrences of the name and replaces them.",
+        description: "Rename a symbol (function, struct, etc.) across a code file. Finds all word-boundary occurrences of the name and replaces them.",
         props: &["file_path", "symbol", "new_name"],
         required: &["file_path", "symbol", "new_name"],
-        positional: false,
-    },
-    SurfaceTool {
-        sub: "word",
-        description: "Linguistic-scope edit: single token swap, format-agnostic. Omit replace to delete the resolved scope.",
-        props: &["file_path", "word", "replace"],
-        required: &["file_path"],
-        positional: true,
-    },
-    SurfaceTool {
-        sub: "phrase",
-        description: "Linguistic-scope edit: structural name or exact text. Omit replace to delete the resolved scope.",
-        props: &["file_path", "phrase", "replace"],
-        required: &["file_path"],
-        positional: true,
-    },
-    SurfaceTool {
-        sub: "sentence",
-        description: "Linguistic-scope edit: the single line containing the scope text. Omit replace to delete the resolved scope.",
-        props: &["file_path", "sentence", "replace"],
-        required: &["file_path"],
-        positional: true,
-    },
-    SurfaceTool {
-        sub: "paragraph",
-        description: "Linguistic-scope edit: the full block containing the scope text. Omit replace to delete the resolved scope.",
-        props: &["file_path", "paragraph", "replace"],
-        required: &["file_path"],
-        positional: true,
     },
 ];
 

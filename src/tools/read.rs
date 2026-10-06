@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::ast;
+use crate::tools::text as text_scope;
 
 const MAX_DEPTH: usize = 8;
 const STUDY_PREAMBLE_LINES: usize = 30;
@@ -29,6 +30,8 @@ struct Args {
     #[serde(default)]
     symbol: Option<String>,
     #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
     query: Option<String>,
     #[serde(default)]
     pattern: Option<String>,
@@ -42,6 +45,14 @@ pub async fn run(args: Value) -> ToolResult {
 
     if args.file_path.is_empty() {
         return ToolResult::error("file_path is required");
+    }
+
+    if let Some(scope) = args.scope.as_deref() {
+        let p = PathBuf::from(&args.file_path);
+        if !p.exists() {
+            return ToolResult::error(format!("No files resolved from '{}'. Check the path.", args.file_path));
+        }
+        return read_by_scope(&p, scope);
     }
 
     let targets = resolve_targets(&args.file_path);
@@ -335,6 +346,40 @@ fn read_by_pattern(targets: &[PathBuf], pattern: &str) -> ToolResult {
     }
 }
 
+fn read_by_scope(path: &Path, scope_str: &str) -> ToolResult {
+    if ast::detect_language(path).is_some() {
+        return ToolResult::error(format!(
+            "'{}' is a code file - address it with --symbol.",
+            path.display()
+        ));
+    }
+    let (scope, text) = match text_scope::TextScope::parse(scope_str) {
+        Some(p) => p,
+        None => return ToolResult::error(format!(
+            "unknown scope '{scope_str}' - use 'token|slot|statement|block <text>'"
+        )),
+    };
+    let original = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
+    };
+    let (start, end) = match text_scope::resolve(&original, path, scope, text) {
+        Some(r) => r,
+        None => return ToolResult::error(format!(
+            "{} '{text}' not found in {}. Read the file first to see its content.",
+            scope.tag(), path.display()
+        )),
+    };
+    let snippet = text_scope::window(&original, start, end, 1);
+    let bare = &original[start..end];
+    ToolResult {
+        output: format!("=== {} - '{} {}' ===\n\n{}", path.display(), scope.tag(), text, snippet),
+        title: Some(format!("{} '{} {}'", path.display(), scope.tag(), text)),
+        metadata: Some(json!({ "scope": scope.tag(), "bytes": bare.len() })),
+        is_error: false,
+    }
+}
+
 fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
     let mut out = String::new();
     let mut matches = 0usize;
@@ -446,8 +491,12 @@ fn safe_line_count(p: &Path) -> usize {
     fs::read_to_string(p).map(|s| s.lines().count()).unwrap_or(0)
 }
 
+#[cfg(test)]
 mod tests {
+    #[cfg_attr(not(test), allow(unused_imports))]
     use super::*;
+    use super::is_glob;
+    use super::seg_to_regex;
 
     #[test]
     fn is_glob_detects_star_question() {

@@ -1,18 +1,9 @@
-//! runuz - a standalone filesystem tool: `code`, `text`,
-//! `read` for any project on Earth. AST-grounded via tree-sitter.
-//! The CLI binary (`runuz`) wraps these ops.
-
 pub mod ast;
+mod io;
 pub mod tools;
-
-// ── tool contract ────────────────────────────────────────────────────────
-// The runuz tool contract - the standalone surface the runuz-hive
-// mirrors over the thrum protocol. Tool bodies stay drop-in identical.
 
 use serde_json::Value;
 
-/// One advertised tool. Description + schema land in a registry /
-/// MCP client's tool pickers.
 #[derive(Debug, Clone, Default)]
 pub struct ToolDef {
     pub name: String,
@@ -20,7 +11,6 @@ pub struct ToolDef {
     pub input_schema: Value,
 }
 
-/// Outcome of one tool dispatch.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
     pub output: String,

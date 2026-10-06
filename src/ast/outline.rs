@@ -1,9 +1,5 @@
 use crate::ast::{Symbol, SymbolKind};
 
-pub(crate) fn format_symbols(symbols: &[Symbol]) -> String {
-    format_symbols_with_callees(symbols, None)
-}
-
 pub(crate) fn format_symbols_with_callees(
     symbols: &[Symbol],
     callees: Option<&[Vec<String>]>,
@@ -54,7 +50,7 @@ mod tests {
             Symbol { name: "inner".into(), kind: SymbolKind::Method, start_byte: 20, end_byte: 50,  start_row: 3,  end_row: 5 },
             Symbol { name: "Sibling".into(), kind: SymbolKind::Class, start_byte: 110, end_byte: 200, start_row: 12, end_row: 20 },
         ];
-        let out = format_symbols(&syms);
+        let out = format_symbols_with_callees(&syms, None);
         assert!(out.contains("class Outer"));
         assert!(out.contains("  method inner"));
         assert!(out.contains("class Sibling"));
