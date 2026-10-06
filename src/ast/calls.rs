@@ -68,7 +68,8 @@ const NOISE: &[&str] = &[
     "sort_by_key", "min", "max", "sum", "abs", "line", "lines", "find",
     "position", "range", "str", "int", "float", "bool", "list", "dict",
     "set", "tuple", "super", "open", "isinstance", "hasattr", "getattr",
-    "setattr",
+    "setattr", "append", "cap", "copy", "delete", "len", "make", "panic",
+    "recover", "string", "byte", "rune", "float64",
 ];
 
 pub(crate) fn call_sites(source: &str, lang: LangSpec) -> Vec<(usize, String)> {
