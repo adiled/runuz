@@ -28,8 +28,8 @@ pub struct SurfaceTool {
 pub const SURFACE: &[SurfaceTool] = &[
     SurfaceTool {
         sub: "read",
-        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps) with per-symbol callees as a `→ name, name` suffix; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (exact, dot-nested — the ONE path that outputs a symbol's internal code, prefixed by its calls: line), scope (address a text rung: 'token|slot|statement|block <text>' — outputs just that range), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
-        props: &["file_path", "symbol", "scope", "query", "pattern"],
+        description: "Filesystem analysis: discover, study, and search. Works on any file. Code returns a STRUCTURE-ONLY symbol outline (kinds, names, line ranges — no source dumps) with per-symbol callees as a `→ name, name` suffix; configs and docs return an anchor outline; extensionless files return content. Path auto-detection: file | directory | glob. Pick at most one modifier: symbol (any address — NAME or rung 'token|slot|statement|block <text>' — outputs just that range, prefixed by its calls: line for code names), query (fuzzy on symbol NAMES — structure listing only), pattern (regex over CONTENT).",
+        props: &["file_path", "symbol", "query", "pattern"],
         required: &["file_path"],
     },
     SurfaceTool {
@@ -40,31 +40,31 @@ pub const SURFACE: &[SurfaceTool] = &[
     },
     SurfaceTool {
         sub: "replace",
-        description: "Replace an addressed unit or the whole file (address omitted = whole file). Code is addressed by --symbol (or --symbols A,B for a multi-splice/contiguous run) and re-parsed on write; text files are addressed by --scope ('token|slot|statement|block <text>') with no re-parse. --new-source '' deletes the resolved range.",
-        props: &["file_path", "symbol", "symbols", "scope", "new_source"],
+        description: "Replace an addressed unit or the whole file (address omitted = whole file). --symbol takes ANY address: a NAME (code: fn/Class.method/imports, sub-walks, re-parsed on write) or a shape rung 'token <t>' | 'slot <s>' | 'statement <s>' | 'block <s>' (shape edits on code are re-parsed too; on text they validate structure — JSON stays JSON). --symbols A,B = one atomic multi-edit over code names. --new-source '' deletes the resolved range.",
+        props: &["file_path", "symbol", "symbols", "new_source"],
         required: &["file_path"],
     },
     SurfaceTool {
         sub: "insert_before",
-        description: "Splice new_source immediately before the anchor. Code anchors by --symbol (re-parsed on write); text files anchor by --scope ('token|slot|statement|block <text>').",
-        props: &["file_path", "symbol", "scope", "new_source"],
-        required: &["file_path"],
+        description: "Splice new_source immediately before the anchor. The anchor is --symbol: a NAME (code) or a shape rung 'token|slot|statement|block <t>' (any file). Code writes are re-parsed; text writes validate structure.",
+        props: &["file_path", "symbol", "new_source"],
+        required: &["file_path", "symbol"],
     },
     SurfaceTool {
         sub: "insert_after",
-        description: "Splice new_source immediately after the anchor. Code anchors by --symbol (re-parsed on write); text files anchor by --scope ('token|slot|statement|block <text>').",
-        props: &["file_path", "symbol", "scope", "new_source"],
-        required: &["file_path"],
+        description: "Splice new_source immediately after the anchor. The anchor is --symbol: a NAME (code) or a shape rung 'token|slot|statement|block <t>' (any file). Code writes are re-parsed; text writes validate structure.",
+        props: &["file_path", "symbol", "new_source"],
+        required: &["file_path", "symbol"],
     },
     SurfaceTool {
         sub: "delete",
-        description: "Delete an addressed unit. Code: --symbol S or --symbols A,B (contiguous run, blank-line hygiene). Text: --scope 'token|slot|statement|block <text>'.",
-        props: &["file_path", "symbol", "symbols", "scope"],
+        description: "Delete an addressed unit (--symbol NAME or --symbols A,B for a contiguous run, blank-line hygiene; or --symbol 'rung <t>' — any file).",
+        props: &["file_path", "symbol", "symbols"],
         required: &["file_path"],
     },
     SurfaceTool {
         sub: "rename",
-        description: "Rename a symbol (function, struct, etc.) across a code file. Finds all word-boundary occurrences of the name and replaces them.",
+        description: "Rename a symbol (function, struct, etc.) across a code file — finds all word-boundary occurrences of the name and replaces them. On text files, renames the word everywhere.",
         props: &["file_path", "symbol", "new_name"],
         required: &["file_path", "symbol", "new_name"],
     },

@@ -17,7 +17,6 @@ async fn run() -> Result<ExitCode> {
             let res = runuz::tools::read(serde_json::json!({
                 "file_path": c.file_path,
                 "symbol": c.symbol,
-                "scope": c.scope,
                 "query": c.query,
                 "pattern": c.pattern,
             })).await;
@@ -39,7 +38,6 @@ async fn run() -> Result<ExitCode> {
                 "operation": "replace",
                 "symbol": c.symbol,
                 "symbols": c.symbols,
-                "scope": c.scope,
                 "new_source": c.new_source,
             })).await;
             if res.is_error { had_error = true; }
@@ -50,7 +48,6 @@ async fn run() -> Result<ExitCode> {
                 "file_path": c.file_path,
                 "operation": if c.anchor == "before" { "insert_before" } else { "insert_after" },
                 "symbol": c.symbol,
-                "scope": c.scope,
                 "new_source": c.new_source,
             })).await;
             if res.is_error { had_error = true; }
@@ -62,7 +59,6 @@ async fn run() -> Result<ExitCode> {
                 "operation": "delete",
                 "symbol": c.symbol,
                 "symbols": c.symbols,
-                "scope": c.scope,
             })).await;
             if res.is_error { had_error = true; }
             print_result(&res, json);

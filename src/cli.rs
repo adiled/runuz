@@ -21,7 +21,6 @@ pub enum Command {
 pub struct ReadArgs {
     pub file_path: String,
     pub symbol: Option<String>,
-    pub scope: Option<String>,
     pub query: Option<String>,
     pub pattern: Option<String>,
 }
@@ -37,7 +36,6 @@ pub struct ReplaceArgs {
     pub file_path: String,
     pub symbol: Option<String>,
     pub symbols: Option<String>,
-    pub scope: Option<String>,
     pub new_source: Option<String>,
 }
 
@@ -46,7 +44,6 @@ pub struct InsertArgs {
     pub file_path: String,
     pub anchor: String,
     pub symbol: Option<String>,
-    pub scope: Option<String>,
     pub new_source: Option<String>,
 }
 
@@ -55,7 +52,6 @@ pub struct DeleteArgs {
     pub file_path: String,
     pub symbol: Option<String>,
     pub symbols: Option<String>,
-    pub scope: Option<String>,
 }
 
 #[derive(Debug)]
@@ -128,22 +124,19 @@ fn opt<'a>(pairs: &'a [(String, String)], key: &str) -> Option<String> {
     pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
 }
 
-fn addr_flags(pairs: &[(String, String)]) -> Result<(Option<String>, Option<String>, Option<String>)> {
+fn addr_flags(pairs: &[(String, String)]) -> Result<(Option<String>, Option<String>)> {
     let symbol = opt(pairs, "symbol");
     let symbols = opt(pairs, "symbols");
-    let scope = opt(pairs, "scope");
-    let seen = [symbol.is_some(), symbols.is_some(), scope.is_some()].into_iter().filter(|b| *b).count();
-    if seen > 1 {
-        bail!("give exactly one of --symbol, --symbols, --scope");
+    if symbol.is_some() && symbols.is_some() {
+        bail!("give exactly one of --symbol, --symbols");
     }
-    Ok((symbol, symbols, scope))
+    Ok((symbol, symbols))
 }
 
 fn read_args(pairs: &[(String, String)]) -> Result<ReadArgs> {
     Ok(ReadArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         symbol: opt(pairs, "symbol"),
-        scope: opt(pairs, "scope"),
         query: opt(pairs, "query"),
         pattern: opt(pairs, "pattern"),
     })
@@ -157,59 +150,53 @@ fn create_args(pairs: &[(String, String)]) -> Result<CreateArgs> {
 }
 
 fn replace_args(pairs: &[(String, String)]) -> Result<ReplaceArgs> {
-    let allowed = ["file-path", "symbol", "symbols", "scope", "new-source"];
+    let allowed = ["file-path", "symbol", "symbols", "new-source"];
     for (k, _) in pairs {
         if !allowed.contains(&k.as_str()) {
-            bail!("unknown flag --{k} for replace. Allowed: --file-path, --symbol, --symbols, --scope, --new-source");
+            bail!("unknown flag --{k} for replace. Allowed: --file-path, --symbol, --symbols, --new-source");
         }
     }
-    let (symbol, symbols, scope) = addr_flags(pairs)?;
+    let (symbol, symbols) = addr_flags(pairs)?;
     Ok(ReplaceArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         symbol,
         symbols,
-        scope,
         new_source: opt(pairs, "new-source"),
     })
 }
 
 fn insert_args(pairs: &[(String, String)], anchor: &str) -> Result<InsertArgs> {
     for (k, _) in pairs {
-        if !["file-path", "symbol", "scope", "new-source"].contains(&k.as_str()) {
-            bail!("unknown flag --{k} for insert_{anchor}. Allowed: --file-path, --symbol, --scope, --new-source");
+        if !["file-path", "symbol", "new-source"].contains(&k.as_str()) {
+            bail!("unknown flag --{k} for insert_{anchor}. Allowed: --file-path, --symbol, --new-source");
         }
     }
     let symbol = opt(pairs, "symbol");
-    let scope = opt(pairs, "scope");
-    match (&symbol, &scope) {
-        (None, None) => bail!("insert_{anchor} needs an anchor: --symbol S or --scope 'rung text'"),
-        (Some(_), Some(_)) => bail!("give exactly one of --symbol or --scope"),
-        _ => {}
+    if symbol.is_none() {
+        bail!("insert_{anchor} needs an anchor: --symbol NAME or --symbol 'rung <text>'");
     }
     Ok(InsertArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         anchor: anchor.to_string(),
         symbol,
-        scope,
         new_source: opt(pairs, "new-source"),
     })
 }
 
 fn delete_args(pairs: &[(String, String)]) -> Result<DeleteArgs> {
     for (k, _) in pairs {
-        if !["file-path", "symbol", "symbols", "scope"].contains(&k.as_str()) {
-            bail!("unknown flag --{k} for delete. Allowed: --file-path, --symbol, --symbols, --scope");
+        if !["file-path", "symbol", "symbols"].contains(&k.as_str()) {
+            bail!("unknown flag --{k} for delete. Allowed: --file-path, --symbol, --symbols");
         }
     }
-    let (symbol, symbols, scope) = addr_flags(pairs)?;
-    if symbol.is_none() && symbols.is_none() && scope.is_none() {
-        bail!("delete needs a target: --symbol S, --symbols A,B, or --scope 'rung text'");
+    let (symbol, symbols) = addr_flags(pairs)?;
+    if symbol.is_none() && symbols.is_none() {
+        bail!("delete needs a target: --symbol S or --symbols A,B");
     }
     Ok(DeleteArgs {
         file_path: req(pairs, "file-path")?.to_string(),
         symbol,
         symbols,
-        scope,
     })
 }
 
@@ -225,34 +212,30 @@ fn help() {
     println!(r#"runuz - the standalone filesystem CLI
 
 USAGE:
-  runuz read --file-path <path> [--symbol S] [--scope "rung TEXT"] [--query Q] [--pattern RE]
+  runuz read --file-path <path> [--symbol ADDR] [--query Q] [--pattern RE]
   runuz create  --file-path <path> [--new-source T]
-  runuz replace --file-path <path> (--symbol S | --symbols A,B | --scope "rung TEXT") [--new-source T]
-  runuz insert_before --file-path <path> (--symbol S | --scope "rung TEXT") [--new-source T]
-  runuz insert_after  --file-path <path> (--symbol S | --scope "rung TEXT") [--new-source T]
-  runuz delete --file-path <path> (--symbol S | --symbols A,B | --scope "rung TEXT")
-  runuz rename --file-path <path> --symbol S --new-name Y
+  runuz replace --file-path <path> [--symbol ADDR | --symbols A,B] [--new-source T]
+  runuz insert_before --file-path <path> --symbol ADDR [--new-source T]
+  runuz insert_after  --file-path <path> --symbol ADDR [--new-source T]
+  runuz delete --file-path <path> (--symbol ADDR | --symbols A,B)
+  runuz rename --file-path <path> --symbol NAME --new-name Y
   runuz tools [--json]                      (advertised tool surface)
 
-One addressing ladder, two flags:
-  --symbol <name>   the named unit (code: fn/main/Class.method/imports).
-  --scope "<rung> <text>"   the orthographic rungs of any file:
-                  token 'a' | slot 'a.b' (JSON/YAML/TOML/env key or
-                  markdown heading) | statement '…' (its line) |
-                  block '…' (its blank-line paragraph). Text files
-                  only; code files address by --symbol.
+--symbol addresses ANY unit of ANY file, one grammar:
 
-Operations:
-  create        new file (fails if it exists); validates code syntax
-  replace       swap the addressed unit's range (omitted address = whole
-                file); --new-source "" deletes the range
-  insert_before / insert_after   splice new_source at the unit edge
-  delete        drop the unit's range (with blank-line hygiene for code)
-  rename        rename the symbol's name across the file
+  NAME              the named unit (code): fn/Class.method/imports,
+                    sub-walks 'alpha.body', 'alpha.when.otherwise#2'
+  'token <t>'       the first word-boundary occurrence of <t>
+  'slot <s>'        the named value: JSON key-path, YAML/TOML/env key,
+                    markdown heading; falls back to exact substring
+  'statement <s>'   the line containing <s>
+  'block <s>'       the blank-line paragraph containing <s>
 
---symbol accepts dot-nested (e.g. 'Class.method'); 'imports' addresses
-the synthetic top-of-file import block. --json anywhere for
-machine-readable output.
+Code files validate against their grammar; text files validate
+structure (JSON stays JSON). No address on replace = whole file.
+'symbols A,B' = one atomic multi-edit over code symbols.
+Empty --new-source deletes the addressed range. --json anywhere
+for machine-readable output.
 "#);
 }
 

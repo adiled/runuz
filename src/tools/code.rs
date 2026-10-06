@@ -18,8 +18,6 @@ struct Args {
     #[serde(default)]
     symbols: Option<String>,
     #[serde(default)]
-    scope: Option<String>,
-    #[serde(default)]
     new_source: Option<String>,
     #[serde(default)]
     pub new_name: Option<String>,
@@ -31,15 +29,14 @@ fn default_op() -> String { "replace".into() }
 pub(crate) fn def() -> ToolDef {
     ToolDef {
         name: "runuz_code".into(),
-        description: "Author files — AST-grounded, symbol-scoped for code (create | replace | insert_before | insert_after | delete | rename); rung-scoped for text via --scope 'token|slot|statement|block <text>' (replace/insert/delete). The top-of-file import block is addressable as the synthetic 'imports' symbol. Sub-symbol walks (body/when/otherwise/loop/try/return/call) compose with dots and disambiguate with #N. Languages: ts/tsx/js/jsx/mjs/cjs/py/pyi/go/rs. Every code write is re-parsed; a syntax-error result aborts the write. Text writes validate structure (JSON stays JSON).".into(),
+        description: "Author files: create | replace | insert_before | insert_after | delete | rename. Every unit of the file is addressable by --symbol. A name (fn/Class.method/imports, dot-nested sub-walks body/when/otherwise/loop/try/return/call, #N disambiguation) or a shape rung ('token <t>' | 'slot <s>' | 'statement <s>' | 'block <s>'). Slot is format-aware (JSON key-path, YAML/TOML/env key, markdown heading) with exact-substring fallback. A plain name on a non-code file finds its exact text. No symbol means a whole-file replace. Every code write is re-parsed; a syntax-error result aborts the write. Text writes validate structure (JSON stays JSON).".into(),
         input_schema: json!({
             "type": "object",
             "properties": {
                 "file_path":  { "type": "string", "description": "Absolute path to the file." },
                 "operation":  { "type": "string", "description": "One of: create, replace, insert_before, insert_after, delete, rename. Default: replace." },
-                "symbol":     { "type": "string", "description": "Target symbol name (code files). Dot-separated for nested (e.g. 'Class.method'). Use 'imports' for the synthetic import-block symbol." },
-                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names for one atomic replace/delete — contiguous OR non-contiguous; any missing name aborts with no partial edit." },
-                "scope":      { "type": "string", "description": "Text-file rung: 'token <t>' | 'slot <s>' | 'statement <s>' | 'block <s>'. Mutually exclusive with symbol. Slot is format-aware (JSON key-path, YAML/TOML/env key, markdown heading), falls back to exact substring." },
+                "symbol":     { "type": "string", "description": "Address of the unit to edit: a symbol NAME (code files; dot-separated 'Class.method', sub-walks 'alpha.body', 'alpha.when.otherwise#2', synthetic 'imports') or a shape rung 'token <t>' / 'slot <s>' / 'statement <s>' / 'block <s>' (rungs resolve by shape on any file; slot is format-aware and falls back to exact substring). On non-code files, a bare name resolves as its exact text." },
+                "symbols":    { "type": "string", "description": "Comma-separated list of symbol names for one atomic replace/delete, contiguous or not. Any missing name aborts with no partial edit." },
                 "new_source": { "type": "string", "description": "The new source. Required for create/replace/insert. Empty string deletes the addressed range." },
                 "new_name":   { "type": "string", "description": "Rename target (operation rename)." },
             },
@@ -55,50 +52,30 @@ pub async fn run(args: Value) -> ToolResult {
     };
     let path = PathBuf::from(&args.file_path);
 
-    if let Some(scope) = args.scope.as_deref() {
-        return text_op(&path, &args.operation, scope, args.new_source.as_deref());
-    }
     if args.operation == "create" {
         return op_create(&path, ast::detect_language(&path), args.new_source.as_deref());
     }
-    let lang = match ast::detect_language(&path) {
-        Some(l) => l,
-        None => {
-            if args.operation == "replace" && args.symbol.is_none() && args.symbols.is_none() {
-                return whole_file_text_replace(&path, args.new_source.as_deref());
-            }
-            return ToolResult::error(format!(
-                "'{}' has no recognized code extension - use --scope for text files.",
-                path.display()
-            ));
-        }
-    };
 
-    match args.operation.as_str() {
-        "replace" => op_replace(&path, lang, args.symbol.as_deref(), args.symbols.as_deref(), args.new_source.as_deref()),
-        "insert_before" => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::Before),
-        "insert_after"  => op_insert(&path, lang, args.symbol.as_deref(), args.new_source.as_deref(), Anchor::After),
-        "delete" => op_delete(&path, lang, args.symbol.as_deref(), args.symbols.as_deref()),
-        "rename" => op_rename(&path, lang, args.symbol.as_deref(), args.new_name.as_deref()),
-        other => ToolResult::error(format!(
-            "unknown operation '{other}' - pick one of: create, replace, insert_before, insert_after, delete, rename"
-        )),
+    let lang = ast::detect_language(&path);
+    let address = args.symbol.as_deref().map(text_scope::classify);
+
+    match address {
+        Some(text_scope::Address::Shape(scope, text)) => {
+            shape_op(&path, lang, &args.operation, scope, text, args.new_source.as_deref())
+        }
+        Some(text_scope::Address::Name(name)) => {
+            name_op(&path, lang, &args.operation, Some(name), args.symbols.as_deref(),
+                    args.new_source.as_deref(), args.new_name.as_deref())
+        }
+        None => name_op(&path, lang, &args.operation, None, args.symbols.as_deref(),
+                        args.new_source.as_deref(), args.new_name.as_deref()),
     }
 }
 
-fn text_op(path: &Path, operation: &str, scope_str: &str, new_source: Option<&str>) -> ToolResult {
-    if ast::detect_language(path).is_some() {
-        return ToolResult::error(format!(
-            "'{}' is a code file - address it with --symbol.",
-            path.display()
-        ));
-    }
-    let (scope, text) = match text_scope::TextScope::parse(scope_str) {
-        Some(p) => p,
-        None => return ToolResult::error(format!(
-            "unknown scope '{scope_str}' - use 'token|slot|statement|block <text>'"
-        )),
-    };
+fn shape_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, scope: text_scope::TextScope, text: &str,
+    new_source: Option<&str>,
+) -> ToolResult {
     let original = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
@@ -109,6 +86,83 @@ fn text_op(path: &Path, operation: &str, scope_str: &str, new_source: Option<&st
             "{} '{text}' not found in {}. Read the file first to see its content.",
             scope.tag(), path.display()
         )),
+    };
+    text_op(path, lang, operation, scope.tag(), text, start, end, new_source)
+}
+
+fn name_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, name: Option<&str>, symbols: Option<&str>,
+    new_source: Option<&str>, new_name: Option<&str>,
+) -> ToolResult {
+    if operation == "rename" {
+        return match name {
+            Some(n) => op_rename(path, lang, Some(n), new_name),
+            None => ToolResult::error("rename needs --symbol (the name to rename)"),
+        };
+    }
+    if let Some(list) = symbols {
+        let l = match lang {
+            Some(l) => l,
+            None => return ToolResult::error("--symbols (multi) needs a code file. Use a single --symbol on text."),
+        };
+        return match operation {
+            "replace" => op_replace(path, l, name, Some(list), new_source),
+            "delete" => op_delete(path, l, name, Some(list)),
+            other => ToolResult::error(format!(
+                "operation '{other}' does not take --symbols (only replace and delete do)"
+            )),
+        };
+    }
+    let name = match name {
+        Some(n) => n,
+        None => {
+            if operation == "replace" {
+                return match lang {
+                    Some(l) => op_replace(path, l, None, None, new_source),
+                    None => whole_file_text_replace(path, new_source),
+                };
+            }
+            return ToolResult::error(format!(
+                "{} needs an address: --symbol NAME or --symbol 'rung <text>'.",
+                operation
+            ));
+        }
+    };
+    match lang {
+        Some(l) => match operation {
+            "replace" => op_replace(path, l, Some(name), None, new_source),
+            "insert_before" => op_insert(path, l, Some(name), new_source, Anchor::Before),
+            "insert_after"  => op_insert(path, l, Some(name), new_source, Anchor::After),
+            "delete" => op_delete(path, l, Some(name), None),
+            "rename" => unreachable!(),
+            other => ToolResult::error(format!(
+                "unknown operation '{other}' - pick one of: create, replace, insert_before, insert_after, delete, rename"
+            )),
+        },
+        None => {
+            let original = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => return ToolResult::error(format!("read failed: {e}")),
+            };
+            let idx = match original.find(name) {
+                Some(i) => i,
+                None => return ToolResult::error(format!(
+                    "'{name}' not found in {}. Read the file first to see its content.",
+                    path.display()
+                )),
+            };
+            text_op(path, None, operation, "symbol", name, idx, idx + name.len(), new_source)
+        }
+    }
+}
+
+fn text_op(
+    path: &Path, lang: Option<LangSpec>, operation: &str, tag: &str, label: &str,
+    start: usize, end: usize, new_source: Option<&str>,
+) -> ToolResult {
+    let original = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
     let (updated, action) = match operation {
         "replace" => {
@@ -134,20 +188,31 @@ fn text_op(path: &Path, operation: &str, scope_str: &str, new_source: Option<&st
         }
         "delete" => (splice(&original, start, end, ""), "Deleted"),
         other => return ToolResult::error(format!(
-            "operation '{other}' does not take --scope (use create/rename for code, or replace/insert_before/insert_after/delete)"
+            "operation '{other}' cannot be addressed. Use create/rename for files, or replace/insert_before/insert_after/delete for units"
         )),
     };
-    if let Err(msg) = text_scope::validate_structure(path, &original, &updated) {
-        return ToolResult::error(format!(
-            "edit would corrupt {} - {msg}. File NOT modified; fix your replacement and try again.",
-            path.display()
-        ));
+    match lang {
+        Some(l) => {
+            if let Err(msg) = ast::validate_edited(&original, &updated, l, &[(start, end)]) {
+                return ToolResult::error(format!(
+                    "rejected - result has {msg}; original left untouched"
+                ));
+            }
+        }
+        None => {
+            if let Err(msg) = text_scope::validate_structure(path, &original, &updated) {
+                return ToolResult::error(format!(
+                    "edit would corrupt {} - {msg}. File NOT modified; fix your replacement and try again.",
+                    path.display()
+                ));
+            }
+        }
     }
     if let Err(e) = atomic_write(path, &updated) {
         return ToolResult::error(format!("write failed: {e}"));
     }
     ok(
-        format!("{action} {} '{text}' in {} ({} bytes)", scope.tag(), path.display(), updated.len()),
+        format!("{action} {tag} '{label}' in {} ({} bytes)", path.display(), updated.len()),
         path,
     )
 }
@@ -326,7 +391,7 @@ fn op_delete(path: &Path, lang: LangSpec, symbol: Option<&str>, symbols: Option<
 }
 
 fn op_rename(
-    path: &Path, lang: LangSpec, symbol: Option<&str>, new_name: Option<&str>,
+    path: &Path, lang: Option<LangSpec>, symbol: Option<&str>, new_name: Option<&str>,
 ) -> ToolResult {
     let sym_name = match symbol {
         Some(s) => s,
@@ -340,7 +405,27 @@ fn op_rename(
         Ok(s) => s,
         Err(e) => return ToolResult::error(format!("read failed: {e}")),
     };
-    let tree = match ast::parse(&original, lang) {
+    let l = match lang {
+        Some(l) => l,
+        None => {
+            let re = match regex::Regex::new(&format!(r"\b{}\b", regex::escape(sym_name))) {
+                Ok(r) => r,
+                Err(e) => return ToolResult::error(format!("bad rename target: {e}")),
+            };
+            if !re.is_match(&original) {
+                return ToolResult::error(format!("'{sym_name}' not found in {}", path.display()));
+            }
+            let updated = re.replace_all(&original, replacement).into_owned();
+            if let Err(e) = atomic_write(path, &updated) {
+                return ToolResult::error(format!("write failed: {e}"));
+            }
+            return ok(
+                format!("Renamed '{sym_name}' to '{replacement}' in {} (text, word-boundary)", path.display()),
+                path,
+            );
+        }
+    };
+    let tree = match ast::parse(&original, l) {
         Some(t) => t,
         None => return ToolResult::error("parser unavailable".to_string()),
     };
@@ -376,7 +461,7 @@ fn op_rename(
     for (s, e) in ranges.iter().rev() {
         updated.replace_range(*s..*e, replacement);
     }
-    if let Err(msg) = ast::validate_edited(&original, &updated, lang, &ranges) {
+    if let Err(msg) = ast::validate_edited(&original, &updated, l, &ranges) {
         return ToolResult::error(format!("rejected - result has {msg}; original left untouched"));
     }
     if let Err(e) = atomic_write(path, &updated) {
@@ -407,12 +492,12 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
         let name = name.trim();
         if name.is_empty() { continue; }
         let sym = match locate_symbol(source, lang, name) {
-            Err(e) => return Err(format!("{e} — no partial edit applied")),
+            Err(e) => return Err(format!("{e}. No partial edit applied")),
             Ok(s) => s,
         };
         out.push(sym);
     }
-    if out.is_empty() { return Err("symbols list is empty — nothing to edit".into()); }
+    if out.is_empty() { return Err("symbols list is empty; nothing to edit".into()); }
     out.sort_by_key(|s| s.start_byte);
     Ok(out)
 }
@@ -748,17 +833,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refuses_symbol_on_non_code_extension() {
+    async fn plain_name_replace_on_text() {
         let p = tmp("md");
-        fs::write(&p, "# hi\n").unwrap();
+        fs::write(&p, "# heading\n\ntext about hello world\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "replace",
-            "symbol": "head",
-            "new_source": "# bye\n",
+            "symbol": "hello",
+            "new_source": "salut",
         })).await;
-        assert!(res.is_error);
-        assert!(res.output.contains("--scope"), "wrong rejection: {}", res.output);
+        assert!(!res.is_error, "plain name on text should work: {}", res.output);
+        let s = fs::read_to_string(&p).unwrap();
+        assert!(s.contains("salut"), "swapped: {s}");
         let _ = fs::remove_file(&p);
     }
 
@@ -777,16 +863,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scope_replace_on_non_code() {
+    async fn shape_replace_on_text() {
         let p = tmp("env");
         fs::write(&p, "DB_HOST=localhost\nDB_PORT=5432\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "replace",
-            "scope": "slot DB_HOST",
+            "symbol": "slot DB_HOST",
             "new_source": "production-db",
         })).await;
-        assert!(!res.is_error, "scope replace failed: {}", res.output);
+        assert!(!res.is_error, "shape replace failed: {}", res.output);
         let s = fs::read_to_string(&p).unwrap();
         assert!(s.contains("DB_HOST=production-db"), "swapped: {s}");
         assert!(s.contains("DB_PORT"), "kept: {s}");
@@ -794,15 +880,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scope_delete_leaves_rest() {
+    async fn shape_delete_leaves_rest() {
         let p = tmp("md");
         fs::write(&p, "# Old Title\n\n## Section\n\nContent here.\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "delete",
-            "scope": "slot ## Section",
+            "symbol": "slot ## Section",
         })).await;
-        assert!(!res.is_error, "scope delete failed: {}", res.output);
+        assert!(!res.is_error, "shape delete failed: {}", res.output);
         let s = fs::read_to_string(&p).unwrap();
         assert!(!s.contains("## Section"), "section gone: {s}");
         assert!(s.contains("# Old Title"), "title kept: {s}");
@@ -810,28 +896,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scope_rejects_code_file() {
+    async fn shape_edit_on_code_is_reparsed() {
         let p = tmp("rs");
         fs::write(&p, "fn alpha() {}\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "replace",
-            "scope": "token alpha",
+            "symbol": "token alpha",
             "new_source": "beta",
         })).await;
-        assert!(res.is_error);
-        assert!(res.output.contains("--symbol"), "should point at --symbol: {}", res.output);
+        assert!(!res.is_error, "shape edit on code should work: {}", res.output);
+        assert!(fs::read_to_string(&p).unwrap().contains("fn beta"),
+            "should have renamed: {}", fs::read_to_string(&p).unwrap());
+        let res_bad = run(json!({
+            "file_path": p.display().to_string(),
+            "operation": "replace",
+            "symbol": "statement fn beta",
+            "new_source": "this is not rust ((",
+        })).await;
+        assert!(res_bad.is_error, "broken shape edit on code must be rejected");
+        assert!(fs::read_to_string(&p).unwrap().contains("fn beta"),
+            "file untouched after rejected edit");
         let _ = fs::remove_file(&p);
     }
 
     #[tokio::test]
-    async fn scope_empty_string_deletes() {
+    async fn shape_empty_string_deletes() {
         let p = tmp("txt");
         fs::write(&p, "host = localhost\nport = 3000\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
             "operation": "replace",
-            "scope": "token localhost",
+            "symbol": "token localhost",
             "new_source": "",
         })).await;
         assert!(!res.is_error, "empty replace failed: {}", res.output);

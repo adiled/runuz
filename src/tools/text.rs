@@ -10,6 +10,19 @@ pub(crate) enum TextScope {
     Block,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Address<'a> {
+    Name(&'a str),
+    Shape(TextScope, &'a str),
+}
+
+pub(crate) fn classify(symbol: &str) -> Address<'_> {
+    match TextScope::parse(symbol) {
+        Some((scope, text)) => Address::Shape(scope, text),
+        None => Address::Name(symbol),
+    }
+}
+
 impl TextScope {
     pub(crate) fn tag(self) -> &'static str {
         match self {
