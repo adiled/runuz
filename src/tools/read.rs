@@ -1,25 +1,3 @@
-//! `runuz_read` — the ONE filesystem analysis tool.
-//!
-//! - **Path resolution**: file | directory | glob (auto-detected by
-//!   `*` or `?` in the path).
-//! - **Modifier-free single-target**: structure-only view for code
-//!   files (symbol outline: kinds, names, line ranges — no source
-//!   dumps); line-numbered preamble + stats.
-//! - **Modifier-free multi-target**: inventory view (one line per
-//!   resolved file, line count + size).
-//! - **`pattern`**: regex over file CONTENT. Returns matching lines
-//!   with `path:line` annotation. Code-file enclosing-symbol
-//!   annotation included.
-//! - **`symbol`**: the ONE path that outputs a symbol's internal
-//!   code — the exact byte range of the named (dot-nested) symbol.
-//! - **`query`**: fuzzy case-insensitive substring match on symbol
-//!   NAMES. Returns a structure listing (kind + name + lines), never
-//!   source text.
-//!
-//! Skips junk dirs (`node_modules`, `.git`, `target`, `__pycache__`,
-//! `dist`, `build`, etc.) on dir walks and glob expansion. Caps
-//! resolved targets at 200 (a `read('/')` doesn't explode).
-
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -259,8 +237,9 @@ fn study_single(path: &Path) -> ToolResult {
     });
     if let Some((lang, syms)) = &outline {
         out.push_str(&format!("[{} - {} symbol(s)]\n\n", lang.name(), syms.len()));
+        let callees = ast::calls::callees_per_symbol(syms, &content, *lang);
         out.push_str("outline:\n");
-        out.push_str(&ast::outline::format_symbols(syms));
+        out.push_str(&ast::outline::format_symbols_with_callees(syms, Some(&callees)));
         out.push('\n');
     }
 
@@ -372,6 +351,15 @@ fn read_by_symbol(targets: &[PathBuf], symbol: &str) -> ToolResult {
             Ok((start, end, _start_row, _end_row)) => {
                 matches += 1;
                 out.push_str(&format!("=== {} - '{symbol}' ===\n", path.display()));
+                let mut names: Vec<String> = Vec::new();
+                for (off, name) in ast::calls::call_sites(&content, lang) {
+                    if off >= start && off < end && !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+                if !names.is_empty() {
+                    out.push_str(&format!("calls: {}\n\n", names.join(", ")));
+                }
                 let slice = content.get(start..end).unwrap_or("");
                 for line in slice.lines() {
                     out.push_str(line);

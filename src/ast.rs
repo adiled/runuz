@@ -16,6 +16,7 @@ use std::path::Path;
 
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
 
+pub(crate) mod calls;
 pub(crate) mod outline;
 pub(crate) mod query;
 pub(crate) mod subwalk;

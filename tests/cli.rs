@@ -80,6 +80,37 @@ fn read_json_output() {
     assert!(stdout.contains("\"output\""), "should have output field: {stdout}");
 }
 
+#[test]
+fn read_outline_shows_callees() {
+    let f = tmp_file("fn helper() {}\nfn caller() { helper(); helper(); }\n", "rs");
+    let (ok, stdout, _) = runuz(&["read", "--file-path", f.path().to_str().unwrap()]);
+    assert!(ok, "read should succeed");
+    assert!(stdout.contains("fn caller"), "caller missing: {stdout}");
+    let caller_line = stdout.lines().find(|l| l.contains("fn caller")).unwrap();
+    assert!(caller_line.contains("→ helper"), "callee suffix missing: {caller_line}");
+    let helper_line = stdout.lines().find(|l| l.contains("fn helper")).unwrap();
+    assert!(!helper_line.contains('→'), "helper should be silent: {helper_line}");
+}
+
+#[test]
+fn read_symbol_shows_calls_line() {
+    let f = tmp_file("fn helper() {}\nfn caller() { helper(); }\n", "rs");
+    let (ok, stdout, _) = runuz(&["read", "--file-path", f.path().to_str().unwrap(), "--symbol", "caller"]);
+    assert!(ok, "read symbol should succeed");
+    assert!(stdout.contains("calls: helper"), "calls line missing: {stdout}");
+    assert!(stdout.contains("fn caller()"), "code missing: {stdout}");
+}
+
+#[test]
+fn read_outline_hides_macros_from_callees() {
+    let f = tmp_file("fn caller() { println!(\"x\"); helper(); }\nfn helper() {}\n", "rs");
+    let (ok, stdout, _) = runuz(&["read", "--file-path", f.path().to_str().unwrap()]);
+    assert!(ok, "read should succeed");
+    let caller_line = stdout.lines().find(|l| l.contains("fn caller")).unwrap();
+    assert!(caller_line.contains("→ helper"), "helper missing: {caller_line}");
+    assert!(!caller_line.contains("println"), "macro leaked: {caller_line}");
+}
+
 // ── create ────────────────────────────────────────────────────────────
 
 #[test]
