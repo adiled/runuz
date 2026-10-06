@@ -1,0 +1,382 @@
+.TH RUNUZ 1 "October 2026" "runuz 0.3.0" "User Commands"
+.SH NAME
+runuz \- standalone filesystem CLI: read, create, and surgically edit files by symbol and structure
+.SH SYNOPSIS
+.B runuz
+.I command
+[
+.I options
+]
+.sp
+.B runuz read \-\-file\-path
+.I path
+.RI [
+.B \-\-symbol
+.I addr
+.RI |
+.B \-\-query
+.I name
+.RI |
+.B \-\-pattern
+.I regex
+.RI ]
+.RI [
+.B \-\-json
+.RI ]
+.br
+.B runuz create \-\-file\-path
+.I path
+.RI [
+.B \-\-new\-source
+.I text
+.RI ]
+.br
+.B runuz replace \-\-file\-path
+.I path
+.RI [
+.B \-\-symbol
+.I addr
+.RI |
+.B \-\-symbols
+.I a,b
+.RI ]
+.RI [
+.B \-\-new\-source
+.I text
+.RI ]
+.br
+.B runuz insert_before \-\-file\-path
+.I path
+.B \-\-symbol
+.I addr
+.B \-\-new\-source
+.IR text
+.br
+.B runuz insert_after \-\-file\-path
+.I path
+.B \-\-symbol
+.I addr
+.B \-\-new\-source
+.IR text
+.br
+.B runuz delete \-\-file\-path
+.I path
+.RI [
+.B \-\-symbol
+.I addr
+.RI |
+.B \-\-symbols
+.IR a,b ]
+.br
+.B runuz rename \-\-file\-path
+.I path
+.B \-\-symbol
+.I name
+.B \-\-new\-name
+.IR name
+.br
+.B runuz tools
+.RI [
+.B \-\-json
+.RI ]
+.SH DESCRIPTION
+.B runuz
+is a single binary with one address grammar shared by every edit
+operation.  An address names any unit of any file: a symbol in source
+code, a key in a config, a heading in a document.  The same address
+works for
+.BR replace ,
+.BR insert ,
+.BR delete ,
+and
+.BR rename .
+.PP
+Code files are parsed with tree\-sitter.  Every write to a code file is
+re\-parsed before it is accepted; a result that does not parse is
+rejected and the file is left untouched.  Writes to text files validate
+structure where a format exists (JSON stays JSON).
+.PP
+Run
+.B runuz help
+or
+.B runuz
+with no arguments for the short usage text.
+.SH COMMANDS
+.TP
+.B read
+Filesystem analysis: discover, study, and search.  Works on any file.
+.PP
+Output is determined by the file type:
+.RS 4
+.TP
+.B code
+STRUCTURE\-ONLY symbol outline: kind, name, and line range per symbol
+\-\- no source dumps.  Each symbol is followed by its callees as a
+.I \-> name, name
+suffix.
+.TP
+.B config / document
+Anchor outline (JSON keys, YAML/TOML/env names, markdown headings).
+.TP
+.B extensionless
+Raw content.
+.RE
+.PP
+At most one modifier:
+.RS 4
+.TP
+.B \-\-symbol
+Output just the addressed unit's range.  For code names the range is
+prefixed with a
+.I calls:
+line.
+.TP
+.B \-\-query
+Fuzzy search over symbol NAMES.  Structure listing only, no content.
+.TP
+.B \-\-pattern
+Regular expression over content.  Every hit is annotated with the
+smallest enclosing symbol (function, class, ...) when the file is code.
+.RE
+.TP
+.B create
+Create a new file.  Fails if the file exists.  Code files are re\-parsed
+after writing and a syntax\-error result aborts the create; configs and
+documents are written as\-is.  An empty
+.B \-\-new\-source
+creates an empty file.
+.TP
+.B replace
+Replace an addressed unit, or the whole file when the address is
+omitted.  An empty
+.B \-\-new\-source
+deletes the resolved range.  Code writes are re\-parsed; a broken result
+aborts and the file stays untouched.
+.TP
+.B insert_before
+Splice
+.B \-\-new\-source
+immediately before the anchor address.  Code writes are re\-parsed;
+text writes validate structure.
+.TP
+.B insert_after
+Splice
+.B \-\-new\-source
+immediately after the anchor address.
+.TP
+.B delete
+Delete the addressed unit.  The unit's whole line is removed, including
+a field terminator (such as a trailing comma); an adjacent blank line is
+eaten only when the line left behind is surely blank, so a sibling
+sharing the line survives.
+.TP
+.B rename
+Rename a symbol across a code file (function, struct, class, method,
+and so on).
+Every word\-boundary occurrence of the name is replaced.  On text
+files the word is renamed everywhere.
+.TP
+.B tools
+Advertise the tool surface.  With
+.BR \-\-json ,
+emit one
+.I ToolDef
+per command, named
+.IR runuz_ <command>,
+with the input schema.  This is the contract external agents mirror to
+discover the CLI; dispatching is generic
+.RI "( runuz <command> \-\-<key> <value> )",
+so growing the CLI never requires a consumer change.
+.SH ADDRESSING
+An address is a single string passed to
+.BR \-\-symbol .
+There are two forms.
+.SS Named symbols (code)
+A symbol path is dot\-separated segments:
+.sp
+.nf
+alpha
+Server.start
+Carrier.hold.when.otherwise
+alpha.loop#2.body
+imports
+.fi
+.PP
+Named segments resolve against the symbol index.  Symbols are the
+named structural definitions a language exposes: functions, methods,
+classes/structs/traits/interfaces, impl blocks, enums, type aliases,
+modules, consts/statics, and struct fields.
+.PP
+Control flow is reached with seven alias words:
+.RS 4
+.TP
+.B body
+The inside block of any compound (function body, then\-branch, loop
+body, try block).
+.TP
+.B when
+An
+.B if
+.
+.TP
+.B otherwise
+The alternate branch: the
+.B else
+of an
+.BR if ,
+or a catch clause of a
+.BR try .
+.TP
+.B loop
+A
+.BR for ,
+.BR while ,
+.BR loop ,
+or
+.BR do .
+.TP
+.B try
+A try construct (unsupported on Rust, see NOTES).
+.TP
+.B return
+A return statement.
+.TP
+.B call
+A function call.
+.RE
+.PP
+The walk is document order.  Occurrences are disambiguated with
+.IR #N ;
+.N counts distinct siblings, not nested matches inside earlier matches,
+so a call inside a call is
+.I call#1.call,
+not
+.IR call#2 .
+.PP
+A bare name that matches several symbols fails loudly rather than
+guessing.  Qualify by containment
+.RI ( Type.empty
+resolves the method inside the type, even when a free function
+.B empty
+also exists) or pin an occurrence with
+.IR #N .
+.PP
+The synthetic symbol
+.B imports
+addresses the leading contiguous run of top\-level import/use/require/
+include declarations of any language, as one unit.
+.SS Shape rungs (any file)
+Four structural rungs address non\-symbol structure on any file,
+including text:
+.sp
+.nf
+token <text>       a single word
+slot <text>        a format\-aware key
+statement <text>   one logical statement or line
+block <text>       an indented region
+.fi
+.PP
+A
+.B slot
+is resolved against the file's format first: a JSON key path
+.RI ( auth.api_url ),
+a YAML/TOML/env key
+.RI ( package.version ,
+.RI DATABASE_URL ),
+or a markdown heading.  When the text does not match a format element,
+the slot falls back to an exact substring search.
+.PP
+On a plain text file, a bare
+.B NAME
+address (no shape word) also resolves as an exact substring.
+.SH PATH RESOLUTION
+.B \-\-file\-path
+accepts:
+.RS 4
+.TP
+.B file
+An absolute path to a file.
+.TP
+.B directory
+An absolute directory; the tool walks it.
+.TP
+.B glob
+A pattern such as
+.I '/src/**/*.ts'
+or
+.I '/repo/*.rs'.
+.RE
+.PP
+Relative patterns are anchored at the current working directory.
+.SH MULTI\-EDIT
+.B \-\-symbols a,b
+(comma\-separated) applies
+.B replace
+or
+.B delete
+to several named code symbols as one atomic edit: all ranges are
+resolved against the same source, applied in one pass, and written
+once.  Overlapping or adjacent ranges coalesce into a single span.
+Any missing name aborts the whole edit; nothing is applied partially.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Failure.  An error message is printed to stderr.  With
+.BR \-\-json ,
+the result is a JSON document carrying the error instead.
+.SH EXAMPLES
+.nf
+# Outline a source file
+runuz read --file-path src/main.rs
+
+# Show just one symbol, with the functions it calls
+runuz read --file-path src/main.rs --symbol Server.start
+
+# Swap a config value by its key
+runuz replace --file-path Cargo.toml \\
+        --symbol 'slot package.version' \\
+        --new-source 'version = "0.4.0"'
+
+# Edit a JSON key path
+runuz replace --file-path app.json \\
+        --symbol 'slot auth.api_url' \\
+        --new-source '"https://prod.example"'
+
+# Replace a function body through the sub-walk
+runuz replace --file-path main.rs \\
+        --symbol alpha.body \\
+        --new-source '{ 42 }'
+
+# Delete two definitions in one atomic edit
+runuz delete --file-path main.rs --symbols dead_one,dead_two
+
+# Splice a call after a named anchor
+runuz insert_after --file-path main.rs \\
+        --symbol Carrier.hold --new-source 'drop_for(&x);'
+
+# Rename a type everywhere it appears
+runuz rename --file-path lib.rs --symbol Legacy --new-name Modern
+
+# Search content, annotated with the enclosing function
+runuz read --file-path '/repo/**/*.rs' --pattern 'TODO'
+.fi
+.SH NOTES
+The
+.B try
+alias is unsupported on Rust: tree\-sitter\-rust has no top\-level try
+node, and the
+.B ?
+postfix is a unary operator without a recognizable scope.
+.PP
+The byte range of a symbol is half\-open
+.IR [start,end) ;
+row ranges are 1\-based and inclusive on both ends.
+.SH SEE ALSO
+.BR man (1),
+.BR grep (1),
+.BR sed (1),
+.BR awk (1),
+.BR tree (1)
