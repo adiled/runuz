@@ -37,10 +37,9 @@ surface:
 runuz --help
 ```
 
-The symbol and scope vocabulary, for the parts of the CLI that resolve
-structural names, lives in [`grammar.md`](grammar.md).
+To learn more, see `man runuz`.
 
-## Use as a hum hive
+## Use as a hum hive (experimental)
 
 runuz started as hum's filesystem-forager surface, and this standalone
 binary is the installable-anywhere version of that same surface. If you
@@ -53,9 +52,15 @@ of truth, so the hive never needs a change when the CLI grows. See
 
 ## Languages
 
-AST-backed today: `rs`, `py`/`pyi`, `go`, `js`/`jsx`/`mjs`/`cjs`,
-`ts`, `tsx`. Everything else is handled by the structure-aware
-non-code path. `bash` is intentionally not part of the standalone CLI.
+AST-backed today:
+
+- [x] Rust (`rs`)
+- [x] Python (`py`, `pyi`)
+- [x] Go (`go`)
+- [x] JavaScript (`js`, `jsx`, `mjs`, `cjs`)
+- [x] TypeScript (`ts`)
+- [x] TSX (`tsx`)
+- [x] All text files
 
 ## License
 
