@@ -1,8 +1,3 @@
-# runuz. A standalone filesystem tool: do_code / do_nocode / do_read for
-# any project on Earth. AST-grounded via tree-sitter.
-#
-# One artifact: the binary. No daemon, no install dir bullshit.
-
 CARGO    ?= cargo
 BIN_NAME ?= runuz
 TARGET   ?= release
@@ -19,7 +14,7 @@ CARGO_BIN  := $(HOME)/.cargo/bin/$(BIN_NAME)
 .DEFAULT_GOAL := check
 
 help:
-	@echo "runuz. A standalone filesystem tool: do_code / do_nocode / do_read."
+	@echo "runuz. A standalone filesystem tool."
 	@echo ""
 	@echo "fast iteration (no link):"
 	@echo "  make check       cargo check"
