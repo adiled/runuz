@@ -237,8 +237,58 @@ structure (JSON stays JSON). No address on replace = whole file.
 Empty --new-source deletes the addressed range. --json anywhere
 for machine-readable output.
 "#);
+    if install_man_page() {
+        println!("\nnow you can also read man runuz");
+    }
 }
 
 fn version() {
     println!("runuz {}", env!("CARGO_PKG_VERSION"));
+}
+
+static MAN_PAGE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/man/runuz.1"));
+
+fn install_man_page() -> bool {
+    if std::env::consts::OS == "windows" {
+        return false;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let cargo_home = std::env::var("CARGO_HOME")
+        .unwrap_or_else(|_| format!("{home}/.cargo"));
+    if home.is_empty() || cargo_home.is_empty() {
+        return false;
+    }
+    let mut ok = false;
+    for dir in [
+        format!("{cargo_home}/share/man/man1"),
+        format!("{home}/.local/share/man/man1"),
+    ] {
+        if write_man_page(&dir, true) {
+            ok = true;
+        }
+    }
+    for dir in [
+        "/opt/homebrew/share/man/man1",
+        "/usr/local/share/man/man1",
+    ] {
+        if std::path::Path::new(dir).is_dir() && write_man_page(dir, false) {
+            ok = true;
+        }
+    }
+    ok
+}
+
+fn write_man_page(dir: &str, create: bool) -> bool {
+    let path = std::path::Path::new(dir).join("runuz.1");
+    if let Ok(existing) = std::fs::read(&path) {
+        return existing == MAN_PAGE.as_bytes();
+    }
+    let create_dir = if create {
+        std::fs::create_dir_all(dir)
+    } else {
+        Ok(())
+    };
+    create_dir
+        .and_then(|_| std::fs::write(&path, MAN_PAGE))
+        .is_ok()
 }

@@ -1,14 +1,9 @@
-//! Symbol data model. One Symbol per top-level or nested definition
-//! captured by a language's symbol query.
-
 #[derive(Debug, Clone)]
 pub(crate) struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
-    /// Byte range over the source. Half-open `[start_byte, end_byte)`.
     pub start_byte: usize,
     pub end_byte: usize,
-    /// 1-based row range, inclusive on both ends.
     pub start_row: usize,
     pub end_row: usize,
 }
@@ -17,15 +12,15 @@ pub(crate) struct Symbol {
 pub(crate) enum SymbolKind {
     Function,
     Method,
-    Class,   // class / struct / trait / interface
-    Impl,    // impl block — labeled distinctly from the type it implements
+    Class,
+    Impl,
     Const,
-    Var,     // mutable top-level binding (let, var)
-    Type,    // type alias
+    Var,
+    Type,
     Enum,
-    Module,  // mod / namespace
-    Imports, // synthetic 'imports' block (P5)
-    Field,   // struct field (Rust)
+    Module,
+    Imports,
+    Field,
     Other,
 }
 

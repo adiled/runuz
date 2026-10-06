@@ -483,9 +483,6 @@ fn locate_symbol(source: &str, lang: LangSpec, name: &str) -> Result<Symbol, Str
     })
 }
 
-/// Resolve several named symbols against the SAME `source` (so no
-/// byte drift), and return them ordered by start_byte. Any missing
-/// name is an error (no partial resolution).
 fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>, String> {
     let mut out = Vec::new();
     for name in list.split(',') {
@@ -502,11 +499,6 @@ fn resolve_multi(source: &str, lang: LangSpec, list: &str) -> Result<Vec<Symbol>
     Ok(out)
 }
 
-/// `replace` across several symbols — contiguous or not. Each symbol's
-/// own byte range is replaced with `new_source` (multi-site splice),
-/// resolved against the same source, applied in one pass, one write.
-/// Overlapping/adjacent ranges coalesce into one combined span, so a
-/// contiguous run still yields a single replacement.
 fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> Result<(String, Vec<(usize, usize)>), String> {
     let syms = resolve_multi(source, lang, list)?;
     let mut ranges: Vec<(usize, usize)> =
@@ -524,11 +516,6 @@ fn replace_multi(source: &str, lang: LangSpec, list: &str, new_source: &str) -> 
     Ok((out, merged))
 }
 
-/// `delete` across several symbols — contiguous or not. Each symbol's
-/// own line-range is dropped (multi-site splice), resolved against the
-/// same source, one pass, one write. Overlapping/adjacent ranges
-/// coalesce into one combined span. A trailing newline is only eaten
-/// when the line it leaves behind is surely blank.
 fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<(String, Vec<(usize, usize)>), String> {
     let syms = resolve_multi(source, lang, list)?;
     let mut ranges: Vec<(usize, usize)> = syms.iter().map(|s| {
@@ -549,12 +536,6 @@ fn delete_multi_span(source: &str, lang: LangSpec, list: &str) -> Result<(String
     Ok((out, merged))
 }
 
-/// Synthetic `imports` symbol: the leading contiguous run of
-/// import/use/require/include declarations at top level. Walks
-/// the tree-sitter tree's first-level children and groups
-/// neighbour import nodes into one byte range.
-/// crate-visible alias so `read` can resolve the synthetic
-/// `imports` symbol exactly like the write ops do.
 pub(crate) fn imports_symbol(source: &str, lang: LangSpec) -> Option<(usize, usize, usize, usize)> {
     synthesize_imports(source, lang).map(|s| (s.start_byte, s.end_byte, s.start_row, s.end_row))
 }
@@ -570,14 +551,14 @@ fn synthesize_imports(source: &str, lang: LangSpec) -> Option<Symbol> {
         let kind = child.kind();
         let is_import = matches!(
             kind,
-            "use_declaration"          // rust
+            "use_declaration"
             | "extern_crate_declaration"
-            | "import_statement"       // py, js, ts
-            | "import_from_statement"  // py
-            | "import_declaration"     // go, js, ts
+            | "import_statement"
+            | "import_from_statement"
+            | "import_declaration"
             | "import_spec"
             | "require_statement"
-            | "preproc_include"        // c/cpp
+            | "preproc_include"
         );
         if is_import {
             if first_byte.is_none() { first_byte = Some(child.start_byte()); }
@@ -939,9 +920,6 @@ mod tests {
 
     #[tokio::test]
     async fn replace_sub_symbol_body() {
-        // Replace the body of `alpha` via the sub-symbol path
-        // "alpha.body". Without that, the caller would have to know
-        // alpha's exact byte range.
         let p = tmp("rs");
         fs::write(&p, "fn alpha() {\n    let x = 1;\n}\nfn beta() {}\n").unwrap();
         let res = run(json!({
@@ -1017,7 +995,6 @@ mod tests {
     #[tokio::test]
     async fn delete_does_not_eat_shared_line() {
         let p = tmp("rs");
-        // alpha and beta share one line: `fn alpha() {} fn beta() {}`
         fs::write(&p, "fn alpha() {} fn beta() {}\nfn gamma() {}\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
@@ -1026,8 +1003,6 @@ mod tests {
         })).await;
         assert!(!res.is_error, "delete failed: {}", res.output);
         let updated = fs::read_to_string(&p).unwrap();
-        // beta must survive on its own line — the newline after alpha's
-        // end_byte is NOT blank (beta follows), so it must not be eaten.
         assert!(updated.contains("fn beta"), "beta lost: {updated}");
         assert!(updated.contains("fn gamma"), "gamma lost: {updated}");
         let _ = fs::remove_file(&p);
@@ -1036,7 +1011,6 @@ mod tests {
     #[tokio::test]
     async fn delete_eats_surely_blank_line() {
         let p = tmp("rs");
-        // alpha alone on its line, followed by a blank line then beta.
         fs::write(&p, "fn alpha() {}\n\nfn beta() {}\n").unwrap();
         let res = run(json!({
             "file_path": p.display().to_string(),
@@ -1045,15 +1019,11 @@ mod tests {
         })).await;
         assert!(!res.is_error, "delete failed: {}", res.output);
         let updated = fs::read_to_string(&p).unwrap();
-        // the blank line between alpha and beta should be eaten too,
-        // leaving beta at the top with no dangling blank line.
         assert!(!updated.starts_with("\n"), "dangling blank line: {updated:?}");
         assert!(updated.contains("fn beta"), "beta lost: {updated}");
         let _ = fs::remove_file(&p);
     }
 
-    // Issue #1: pre-existing parse error (Rust 2024 `safe fn`) elsewhere
-    // in the file must NOT block an edit to a clean, unrelated region.
     #[tokio::test]
     async fn delete_ignores_unrelated_preexisting_error() {
         let p = tmp("rs");
@@ -1069,7 +1039,6 @@ mod tests {
         let _ = fs::remove_file(&p);
     }
 
-    // Issue #2: struct fields are addressable symbols — read/replace/delete.
     #[tokio::test]
     async fn replace_struct_field_symbol() {
         let p = tmp("rs");

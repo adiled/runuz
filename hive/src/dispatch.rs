@@ -1,22 +1,3 @@
-//! RunuzDispatcher — the runuz-hive tool registry + dispatch.
-//!
-//! The hive is a **zero-maintenance mirror** of the runuz CLI: it does
-//! no file ops in-process, and it hardcodes no tool list. Instead it
-//! shells out to the installed `runuz` binary (`~/.cargo/bin/runuz`, or
-//! `RUNUZ_BIN`) and:
-//!
-//! - **Discovers** the surface on-the-fly via `runuz tools --json`,
-//!   which emits one `ToolDef` per CLI subcommand named `runuz_<sub>`.
-//!   Those defs are advertised verbatim.
-//! - **Dispatches** generically: `toolName` is `runuz_<sub>`, so it
-//!   maps each schema key present in `args` to `--<kebab-key>` and
-//!   shells out. Scope tools (`runuz_word` etc.) pass the scope value
-//!   as the positional.
-//!
-//! Because the CLI is the single source of truth, growing the CLI never
-//! requires a hive change — the hive mirrors whatever `runuz tools`
-//! reports.
-
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -25,7 +6,6 @@ use hum_nest::{ToolDef, ToolDispatcher, ToolResult};
 use serde_json::{json, Value};
 use tokio::process::Command;
 
-/// Cached advertised surface, loaded once from `runuz tools --json`.
 static DEFS: OnceLock<Vec<ToolDef>> = OnceLock::new();
 
 pub struct RunuzDispatcher;
@@ -45,8 +25,6 @@ fn runuz_bin_path() -> PathBuf {
         })
 }
 
-/// Fetch the advertised surface from the CLI. On any failure, fall back
-/// to an empty list (humd simply sees no tools until the CLI is fixed).
 fn load_defs() -> Vec<ToolDef> {
     let bin = runuz_bin_path();
     let out = match std::process::Command::new(&bin)
@@ -94,7 +72,6 @@ impl ToolDispatcher for RunuzDispatcher {
     }
 }
 
-/// Generic dispatch: `runuz_<sub>` -> `runuz <sub> --<kebab-key> <val>`.
 async fn runuz_dispatch(tool_name: &str, args: Value) -> ToolResult {
     let Some(sub) = tool_name.strip_prefix("runuz_") else {
         return ToolResult::error(format!("runuz: unknown toolName {tool_name:?}"));
@@ -104,20 +81,7 @@ async fn runuz_dispatch(tool_name: &str, args: Value) -> ToolResult {
     };
 
     let mut cli: Vec<String> = vec![sub.to_string()];
-    let scope_keys = ["word", "phrase", "sentence", "paragraph"];
-
-    // Scope tools pass their scope value as the first positional.
-    if scope_keys.contains(&sub) {
-        if let Some(text) = args_obj.get(sub).and_then(Value::as_str) {
-            cli.push(text.to_string());
-        }
-    }
-
-    // Every other schema key maps to --<kebab-key> <val>.
     for (key, val) in args_obj {
-        if key == sub {
-            continue; // scope value already handled as positional
-        }
         if let Some(s) = val.as_str() {
             cli.push(format!("--{}", key.replace('_', "-")));
             cli.push(s.to_string());

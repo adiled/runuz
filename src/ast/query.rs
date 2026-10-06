@@ -1,25 +1,3 @@
-//! Per-language symbol queries.
-//!
-//! Convention used by [`ast::file_symbols`]:
-//!
-//! - Each captured definition pairs a `@<tag>.def` capture (whose
-//!   byte range becomes the symbol's range) with a `@<tag>.name`
-//!   capture (whose text becomes the symbol's name). The `.def`
-//!   tag (`fn`, `method`, `class`, `impl`, `const`, `type`, `enum`,
-//!   `mod`) maps to `SymbolKind` via [`SymbolKind::from_tag`].
-//!
-//! Only NAMED structural definitions are captured: functions,
-//! methods, classes/structs/traits, impl blocks, enums, type
-//! aliases, modules, consts/statics, and struct fields. Control-flow
-//! internals (closures, if/match/loop bodies, arrow functions,
-//! decorators, function literals) are NOT symbols — their structure
-//! is reachable via sub-symbol walks (`body`/`when`/`loop`/…), and
-//! the outline must stay quiet.
-//!
-//! Queries capture symbols at any nesting depth - top-level + nested
-//! level (methods inside classes/impls). Sub-symbol walks
-//! (`body`/`when`/`otherwise`/…) live in a different module (P6).
-
 use crate::ast::LangSpec;
 
 pub(crate) fn symbol_query(lang: LangSpec) -> &'static str {
@@ -29,7 +7,7 @@ pub(crate) fn symbol_query(lang: LangSpec) -> &'static str {
         LangSpec::Go         => GO_QUERY,
         LangSpec::JavaScript => JS_QUERY,
         LangSpec::TypeScript => TS_QUERY,
-        LangSpec::Tsx        => TS_QUERY, // TSX reuses TS surface
+        LangSpec::Tsx        => TS_QUERY,
     }
 }
 

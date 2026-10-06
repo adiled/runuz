@@ -6,9 +6,6 @@ license = "MIT"
 description = "runuz-hive, a formal remote forager hive for hum. Mirrors the runuz CLI tool surface (runuz_<subcommand>) on the fly and shells out to the runuz CLI for filesystem ops. Depends on hum's reusable hive kernel (hum-nest, hum-paths, thrum-core) via git addressing."
 
 [dependencies]
-# hum's reusable hive kernel: the canonical serve_forager / ForagerAdvert /
-# ToolDispatcher / ToolDef / ToolResult. Same deps hum's own fs hive uses,
-# git-addressed from main (the hum crates aren't published to crates.io).
 hum-nest  = { git = "https://github.com/adiled/hum", branch = "main" }
 hum-paths = { git = "https://github.com/adiled/hum", branch = "main" }
 thrum-core = { git = "https://github.com/adiled/hum", branch = "main" }
