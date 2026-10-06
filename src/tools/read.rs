@@ -195,7 +195,6 @@ fn expand_glob(pattern: &str) -> Vec<PathBuf> {
             }
         }
     } else {
-        // Relative - anchor at cwd. Process cwd at boot time; OK for v0.
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         (cwd, pattern.to_string())
     };
@@ -337,8 +336,6 @@ fn read_by_pattern(targets: &[PathBuf], pattern: &str) -> ToolResult {
             Ok(s) => s,
             Err(_) => continue,
         };
-        // For code files, build the symbol index once so each hit
-        // can carry the enclosing function/class name.
         let lang_syms = ast::detect_language(path)
             .map(|lang| ast::file_symbols(&content, lang));
         let mut file_hits = 0usize;
@@ -358,7 +355,7 @@ fn read_by_pattern(targets: &[PathBuf], pattern: &str) -> ToolResult {
                     out.push_str(&format!("{}:{}\t{}\n", path.display(), lineno + 1, line));
                 }
             }
-            byte_cursor += line.len() + 1; // +1 for the '\n'
+            byte_cursor += line.len() + 1;
         }
         if file_hits > 0 { files_with_hits += 1; }
     }

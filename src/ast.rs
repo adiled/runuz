@@ -1,17 +1,3 @@
-//! AST infrastructure - tree-sitter parsers + symbol extraction.
-//!
-//! One parser registry keyed by file extension. Each language ships:
-//!
-//! - a tree-sitter `Language` (loaded from the parser crate),
-//! - a tree-sitter `Query` over named-symbol patterns (functions,
-//!   classes/structs, methods, top-level bindings, types, enums),
-//! - capture-name → `SymbolKind` mapping.
-//!
-//! Symbol extraction parses once, runs the query, walks captures
-//! into a flat `Vec<Symbol>` sorted by byte range. P4 consumes this
-//! for the `read` outline + `symbol` modifier; P5 consumes it for
-//! `do_code` symbol-scoped writes.
-
 use std::path::Path;
 
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator};
@@ -24,9 +10,6 @@ pub(crate) mod symbol;
 
 pub(crate) use symbol::{Symbol, SymbolKind};
 
-/// Recognize a code language from a file path. Returns None for
-/// unsupported extensions; caller falls back to the text path.
-/// Public convenience: is `path` a recognized code file?
 pub fn is_code_file(path: &Path) -> bool {
     detect_language(path).is_some()
 }
@@ -78,17 +61,12 @@ impl LangSpec {
     }
 }
 
-/// Parse a source string against the given language. Returns a
-/// parser-owned tree the caller can query.
 pub(crate) fn parse(source: &str, lang: LangSpec) -> Option<tree_sitter::Tree> {
     let mut parser = Parser::new();
     parser.set_language(&lang.tree_sitter_language()).ok()?;
     parser.parse(source, None)
 }
 
-/// Run the given language's symbol query over `source`, returning
-/// every captured symbol sorted by start byte. Children stay in the
-/// returned tree's order; outline formatting handles indentation.
 pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
     let tree = match parse(source, lang) {
         Some(t) => t,
@@ -113,10 +91,6 @@ pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
         let mut kind = SymbolKind::Other;
         for cap in m.captures {
             let cap_name = capture_names[cap.index as usize];
-            // Convention: `@def` captures the enclosing definition node
-            // (whose byte range we want), `@name` captures the
-            // identifier. Other capture suffixes (.fn / .class / etc.)
-            // act as the kind tag.
             if let Some(tag) = cap_name.strip_suffix(".def") {
                 node_for_range = Some(cap.node);
                 kind = SymbolKind::from_tag(tag);
@@ -127,47 +101,39 @@ pub(crate) fn file_symbols(source: &str, lang: LangSpec) -> Vec<Symbol> {
             }
         }
         if let (Some(sym_name), Some(node)) = (name, node_for_range) {
-            let mut start_byte = node.start_byte();
+            let start_byte = start_with_attributes(node);
             let end_byte = node.end_byte();
-            // Walk backwards through preceding siblings to include attributes
-            let mut sibling = node.prev_sibling();
-            while let Some(sib) = sibling {
-                let kind = sib.kind();
-                if kind == "attribute_item" || kind == "inner_attribute_item" {
-                    start_byte = sib.start_byte();
-                    sibling = sib.prev_sibling();
-                } else {
-                    break;
-                }
-            }
             let start_row = node.start_position().row + 1;
             let end_row = node.end_position().row + 1;
             out.push(Symbol { name: sym_name, kind, start_byte, end_byte, start_row, end_row });
         }
     }
     out.sort_by_key(|s| s.start_byte);
-    // Defense-in-depth: never surface unnamed/anonymous captures.
-    // The queries only capture named structural definitions, but if a
-    // future query ever yields an `Other` (tag `?`) it must not leak
-    // into outlines, ambiguity lists, or pattern annotations.
     out.retain(|s| s.kind != SymbolKind::Other);
     out
 }
 
-/// Resolve a full path string ("foo", "Class.method",
-/// "alpha.when.otherwise", "alpha.loop#2.body") to a byte range
-/// over the source. Walks named-symbol segments first (by
-/// containment of the previously-matched Symbol's byte range),
-/// then alias segments (via `subwalk`) under the resulting AST
-/// node. Returns `(start_byte, end_byte, start_row, end_row)` on
-/// match.
+fn start_with_attributes(node: Node) -> usize {
+    let mut start = node.start_byte();
+    let mut sibling = node.prev_sibling();
+    while let Some(sib) = sibling {
+        let kind = sib.kind();
+        if kind == "attribute_item" || kind == "inner_attribute_item" {
+            start = sib.start_byte();
+            sibling = sib.prev_sibling();
+        } else {
+            break;
+        }
+    }
+    start
+}
+
 pub(crate) fn resolve_path(
     source: &str,
     lang: LangSpec,
     path: &str,
 ) -> Result<(usize, usize, usize, usize), String> {
     let segs: Vec<&str> = path.split('.').collect();
-    // Index of the first alias segment, if any.
     let first_alias_idx = segs.iter().position(|s| subwalk::parse_segment(s).is_some());
     let (name_segs, alias_segs_raw): (Vec<&str>, Vec<&str>) = match first_alias_idx {
         Some(i) => (segs[..i].to_vec(), segs[i..].to_vec()),
@@ -205,10 +171,6 @@ pub(crate) fn resolve_path(
 fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol, String> {
     if segs.is_empty() { return Err("empty symbol path".into()); }
 
-    // First segment: gather ALL symbols with that name. If a bare name
-    // matches multiple, that's ambiguity - fail loudly so a delete/replace
-    // never silently hits the wrong one. Nested paths disambiguate by
-    // containment below.
     let first = segs[0];
     let matches: Vec<&Symbol> = symbols.iter().filter(|s| s.name == first).collect();
     if matches.is_empty() {
@@ -223,30 +185,22 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
             matches.len(), list.join(", ")
         ));
     }
-    // Multi-segment path: walk down, keeping ALL candidate parents at
-    // each level (e.g. a struct and its impl may both be named `Type`),
-    // and find the next segment inside ANY of them. If more than one
-    // parent contains a matching child, that's an ambiguous step.
     let mut candidates: Vec<&Symbol> = matches;
     for &seg in &segs[1..] {
         let mut children: Vec<&Symbol> = Vec::new();
-        let mut from: Vec<&Symbol> = Vec::new();
         for parent in &candidates {
             let inner = symbols.iter().find(|s| {
                 s.name == seg && s.start_byte > parent.start_byte && s.end_byte <= parent.end_byte
             });
             if let Some(s) = inner {
                 children.push(s);
-                from.push(parent);
             }
         }
         if children.is_empty() {
             let names: Vec<&str> = candidates.iter().map(|s| s.name.as_str()).collect();
             return Err(format!("symbol '{seg}' not found inside '{}'", names.join(", ")));
         }
-        // If a single parent is the unambiguous container, keep only its child.
         candidates = children;
-        let _ = from;
     }
     if candidates.len() > 1 {
         let list: Vec<String> = candidates.iter().map(|s| {
@@ -260,9 +214,6 @@ fn resolve_named<'a>(symbols: &'a [Symbol], segs: &[&str]) -> Result<&'a Symbol,
     Ok(candidates[0])
 }
 
-/// Find the smallest symbol enclosing the given byte offset.
-/// Useful for annotating regex hits in `runuz_read` with the
-/// function / class they sit inside.
 pub(crate) fn enclosing_symbol(symbols: &[Symbol], byte: usize) -> Option<&Symbol> {
     let mut best: Option<&Symbol> = None;
     for s in symbols {
@@ -276,26 +227,16 @@ pub(crate) fn enclosing_symbol(symbols: &[Symbol], byte: usize) -> Option<&Symbo
     best
 }
 
-/// Return Err with a one-line message if the source has any syntax
-/// errors per the given language's parser. Used as a post-write
-/// validation gate by `runuz_do_code` (P5).
 pub(crate) fn validate_syntax(source: &str, lang: LangSpec) -> Result<(), String> {
     let tree = parse(source, lang).ok_or_else(|| "parser unavailable".to_string())?;
     let root = tree.root_node();
     if root.has_error() {
-        // Walk to the first ERROR / missing node for a helpful location.
         let (row, col) = first_error_position(root);
         return Err(format!("syntax error at line {}, column {}", row + 1, col + 1));
     }
     Ok(())
 }
 
-/// Collect the byte ranges and text of every ERROR / missing node in
-/// the tree. Text lets us match pre-existing errors across byte shifts
-/// caused by an edit (deleting/inserting bytes above an error moves its
-/// offset), so an edit touching only clean regions isn't blocked by
-/// unrelated pre-existing parse errors elsewhere (e.g. a Rust 2024
-/// `safe fn` a parser doesn't know yet).
 fn error_ranges(node: Node, src: &[u8]) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     let mut cursor = node.walk();
@@ -324,10 +265,6 @@ fn error_ranges(node: Node, src: &[u8]) -> Vec<(usize, usize, String)> {
     out
 }
 
-/// Post-edit syntax gate: reject ONLY if the edit introduced (or
-/// overlapped) a syntax error. `original` is the pre-edit source so we
-/// can ignore pre-existing errors that sit entirely outside the edited
-/// range. `ranges` is the set of byte ranges the write touched.
 pub(crate) fn validate_edited(
     original: &str,
     result: &str,
@@ -451,12 +388,10 @@ class Beta:
     #[test]
     fn bare_name_ambiguous_fails_loudly() {
         let src = "pub fn empty() -> Baseline { Baseline::new() }\nstruct Baseline { }\nimpl Baseline { fn empty() -> Self { Self {} } }\n";
-        // bare `empty` matches a free fn AND a method → ambiguous
         let r = resolve_path(src, LangSpec::Rust, "empty");
         assert!(r.is_err(), "should be ambiguous: {:?}", r);
         let msg = r.unwrap_err();
         assert!(msg.contains("ambiguous"), "msg: {msg}");
-        // qualified path resolves the method inside the impl
         let ok = resolve_path(src, LangSpec::Rust, "Baseline.empty");
         assert!(ok.is_ok(), "qualified path should resolve: {:?}", ok);
     }
@@ -552,18 +487,15 @@ class Beta:
         let src = "#[derive(Debug)]\n#[allow(dead_code)]\nfn alpha() -> u32 { 42 }\n";
         let syms = file_symbols(src, LangSpec::Rust);
         let alpha = syms.iter().find(|s| s.name == "alpha").expect("alpha missing");
-        // The symbol's byte range should start at #[derive(Debug)], not at 'fn'
         let text = &src[alpha.start_byte..alpha.end_byte];
         assert!(text.starts_with("#[derive(Debug)]"), "should include attributes: {:?}", text);
     }
 
     #[test]
     fn validate_edited_allows_preexisting_errors() {
-        // File with a pre-existing syntax error in an unrelated region
         let original = "fn alpha() -> u32 { 1 }\nfn beta( { ;; }\n";
-        // Edit alpha (clean region) - should succeed despite beta's error
         let updated = "fn alpha() -> u32 { 99 }\nfn beta( { ;; }\n";
-        let ranges = vec![(0, 26)]; // alpha's range
+        let ranges = vec![(0, 26)];
         let result = validate_edited(original, updated, LangSpec::Rust, &ranges);
         assert!(result.is_ok(), "pre-existing error should not block edit: {:?}", result);
     }

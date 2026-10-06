@@ -1,8 +1,3 @@
-//! Black-box integration tests for the runuz CLI binary.
-//!
-//! Each test invokes the compiled `runuz` binary as a subprocess,
-//! passing CLI arguments and asserting on stdout/stderr/exit code.
-
 use std::process::Command;
 
 fn runuz(args: &[&str]) -> (bool, String, String) {
@@ -28,7 +23,6 @@ fn tmp_file(content: &str, ext: &str) -> tempfile::NamedTempFile {
     f
 }
 
-// ── read ──────────────────────────────────────────────────────────────
 
 #[test]
 fn read_rust_file_shows_outline() {
@@ -111,7 +105,6 @@ fn read_outline_hides_macros_from_callees() {
     assert!(!caller_line.contains("println"), "macro leaked: {caller_line}");
 }
 
-// ── create ────────────────────────────────────────────────────────────
 
 #[test]
 fn create_writes_file() {
@@ -142,7 +135,6 @@ fn create_rejects_bad_syntax() {
     assert!(stderr.contains("syntax error") || stderr.contains("rejected"), "should mention syntax: {stderr}");
 }
 
-// ── replace ───────────────────────────────────────────────────────────
 
 #[test]
 fn replace_symbol_scoped() {
@@ -196,7 +188,6 @@ fn replace_multi_rejects_missing_symbol() {
 
 #[test]
 fn replace_allows_preexisting_errors() {
-    // File with a pre-existing syntax error in an unrelated region
     let f = tmp_file("fn alpha() -> u32 { 1 }\nfn beta( { ;; }\n", "rs");
     let (ok, stdout, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "alpha", "--new-source", "fn alpha() -> u32 { 99 }"]);
     assert!(ok, "replace should succeed despite pre-existing error: {stdout}");
@@ -214,7 +205,6 @@ fn replace_includes_attributes_in_range() {
     assert!(content.contains("derive"), "should keep derive: {content}");
 }
 
-// ── insert_before / insert_after ─────────────────────────────────────
 
 #[test]
 fn insert_after_anchor() {
@@ -236,7 +226,6 @@ fn insert_before_anchor() {
     assert!(content.contains("fn beta"), "beta kept: {content}");
 }
 
-// ── delete ────────────────────────────────────────────────────────────
 
 #[test]
 fn delete_symbol() {
@@ -268,7 +257,6 @@ fn delete_ignores_unrelated_preexisting_error() {
     assert!(!content.contains("PRODUCT_NAME"), "PRODUCT_NAME gone: {content}");
 }
 
-// ── scope (token / slot / statement / block) ──────────────────────────
 
 #[test]
 fn token_scope_swap() {
@@ -316,7 +304,6 @@ fn scope_read_returns_range() {
     assert!(stdout.contains("DB_HOST"), "should show title: {stdout}");
 }
 
-// ── tools ─────────────────────────────────────────────────────────────
 
 #[test]
 fn tools_lists_surface() {
@@ -339,7 +326,6 @@ fn tools_json_output() {
     assert!(stdout.contains("\"name\""), "should be JSON: {stdout}");
 }
 
-// ── error handling ────────────────────────────────────────────────────
 
 #[test]
 fn unknown_subcommand_errors() {
@@ -364,14 +350,12 @@ fn shape_on_code_renames_and_reparses() {
     assert!(content.contains("fn gamma"), "token renamed: {content}");
     assert!(content.contains("fn beta"), "beta kept: {content}");
 
-    // shape edits on code are re-parsed: broken result must abort, file untouched
     let (ok, _, _) = runuz(&["replace", "--file-path", f.path().to_str().unwrap(), "--symbol", "statement fn gamma", "--new-source", "not rust (("]);
     assert!(!ok, "broken shape edit on code must fail");
     let content = std::fs::read_to_string(f.path()).unwrap();
     assert!(content.contains("fn gamma"), "file untouched after rejected edit: {content}");
 }
 
-// ── json output mode ──────────────────────────────────────────────────
 
 #[test]
 fn json_output_on_success() {
@@ -388,7 +372,6 @@ fn json_output_on_error() {
     assert!(stderr.contains("\"is_error\": true"), "should be JSON error: {stderr}");
 }
 
-// ── real-world file content ───────────────────────────────────────────
 
 fn real_rust_file() -> String {
     r#"use std::collections::HashMap;
@@ -506,7 +489,6 @@ fn replace_imports_in_real_file() {
     assert!(!content.contains("std::io"), "old std::io import gone: {content}");
 }
 
-// ── edge cases ────────────────────────────────────────────────────────
 
 #[test]
 fn empty_file_read() {
@@ -558,7 +540,6 @@ fn large_file_replace() {
     assert!(updated.contains("func_99"), "should keep func_99: {updated}");
 }
 
-// ── multi-language support ────────────────────────────────────────────
 
 #[test]
 fn python_file_operations() {
@@ -595,7 +576,6 @@ fn javascript_file_operations() {
     assert!(stdout.contains("Greeter"), "should find Greeter: {stdout}");
 }
 
-// ── non-code file operations ──────────────────────────────────────────
 
 #[test]
 fn json_slot_swap() {
@@ -646,7 +626,6 @@ fn whole_file_replace_on_non_code() {
     assert_eq!(content, "new body\n", "whole file replaced: {content}");
 }
 
-// ── error recovery ────────────────────────────────────────────────────
 
 #[test]
 fn replace_preserves_file_on_syntax_error() {
@@ -678,7 +657,6 @@ fn multi_delete_atomic_rollback() {
     assert_eq!(content, original, "file should be untouched after partial failure");
 }
 
-// ── glob and directory operations ─────────────────────────────────────
 
 #[test]
 fn read_directory() {
@@ -698,7 +676,6 @@ fn read_glob() {
     let pattern = format!("{}/**/*.rs", dir.path().display());
     let (ok, stdout, _) = runuz(&["read", "--file-path", &pattern]);
     assert!(ok, "read glob should succeed");
-    // Multi-file glob returns inventory view
     assert!(stdout.contains("a.rs") || stdout.contains("b.rs"), "should list files: {stdout}");
 }
 

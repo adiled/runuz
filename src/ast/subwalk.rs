@@ -1,39 +1,15 @@
-//! Sub-symbol walking. 7-word vocabulary that walks into the AST
-//! beyond a named symbol's range:
-//!
-//! - **`body`** - inside-block of any compound (function body, then-
-//!   branch of if, loop body, try block). Resolves the `body` /
-//!   `consequence` named field first; falls back to the first
-//!   block-typed direct child for the language.
-//! - **`when`** - an if (`if_statement` / `if_expression`).
-//! - **`otherwise`** - the alternate branch: `else` of an if (its
-//!   `alternative` field), `catch` of a try (catch-clause typed
-//!   descendant).
-//! - **`loop`** - for / while / loop / do.
-//! - **`try`** - try construct.
-//! - **`return`** - return statement.
-//! - **`call`** - function call.
-//!
-//! Compose with dots; disambiguate with `#N`. Walk is document-order;
-//! `#N` counts distinct siblings, not nested matches inside earlier
-//! matches (a call inside a call is `call#1.call`, not `call#2`).
-
 use std::collections::HashSet;
 
 use tree_sitter::Node;
 
 use crate::ast::LangSpec;
 
-/// One segment after the named symbol. `alias` is one of the 7
-/// vocabulary words; `occurrence` is the 1-based ordinal (1 for
-/// no-`#N` segments).
 #[derive(Debug, Clone)]
 pub(crate) struct AliasSegment {
     pub alias: String,
     pub occurrence: usize,
 }
 
-/// Parse "when#2" → `AliasSegment { alias: "when", occurrence: 2 }`.
 pub(crate) fn parse_segment(raw: &str) -> Option<AliasSegment> {
     let (alias, occurrence) = match raw.split_once('#') {
         Some((a, n)) => (a.to_string(), n.parse().ok()?),
@@ -46,9 +22,6 @@ pub(crate) fn parse_segment(raw: &str) -> Option<AliasSegment> {
     Some(AliasSegment { alias, occurrence })
 }
 
-/// Resolve a path of alias segments under `root`, returning the
-/// final matching node. Each segment's match becomes the scope for
-/// the next segment.
 pub(crate) fn resolve_subpath<'tree>(
     mut root: Node<'tree>,
     segs: &[AliasSegment],
@@ -70,8 +43,6 @@ fn resolve_segment<'tree>(node: Node<'tree>, seg: &AliasSegment, lang: LangSpec)
         }
     }
 }
-
-// -- body / otherwise - context-dependent on the parent node ------------
 
 fn resolve_body<'tree>(node: Node<'tree>, lang: LangSpec) -> Option<Node<'tree>> {
     for field in &["body", "consequence"] {
@@ -106,8 +77,6 @@ fn resolve_otherwise<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
     None
 }
 
-// ── document-order Nth descendant by node-kind set ─────────────────────
-
 fn find_nth_descendant<'tree>(
     root: Node<'tree>, types: &HashSet<&'static str>, occurrence: usize,
 ) -> Option<Node<'tree>> {
@@ -123,9 +92,6 @@ fn walk<'tree>(
         if types.contains(c.kind()) {
             *count += 1;
             if *count == occurrence { return Some(c); }
-            // Per spec: do not descend into matched nodes - a call
-            // inside a call is `call#1.call`, not `call#2` of the
-            // enclosing scope.
             continue;
         }
         if let Some(found) = walk(c, types, occurrence, count) {
@@ -134,8 +100,6 @@ fn walk<'tree>(
     }
     None
 }
-
-// ── per-language tables ────────────────────────────────────────────────
 
 fn block_types(lang: LangSpec) -> HashSet<&'static str> {
     match lang {
@@ -164,9 +128,6 @@ fn alias_types(alias: &str, lang: LangSpec) -> Option<HashSet<&'static str>> {
         ("try", LangSpec::Python) => &["try_statement"],
         ("try", LangSpec::JavaScript) | ("try", LangSpec::TypeScript) | ("try", LangSpec::Tsx)
             => &["try_statement"],
-        // tree-sitter-rust has no top-level `try_expression` node;
-        // `?`-postfix is `try_expression` but it's a unary op without
-        // a recognizable scope. Leave unsupported.
         ("try", _) => return None,
 
         ("return", LangSpec::Rust)   => &["return_expression"],
@@ -212,7 +173,6 @@ mod tests {
         let src = "fn alpha() { let x = 1; x + 1 }";
         let (tree, _) = parse_root_node(src, LangSpec::Rust);
         let root = tree.root_node();
-        // Locate the function_item node.
         let mut cur = root.walk();
         let fn_node = root.children(&mut cur)
             .find(|n| n.kind() == "function_item")
