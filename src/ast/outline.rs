@@ -1,7 +1,5 @@
 use crate::ast::{Symbol, SymbolKind};
 
-const CALL_CAP: usize = 6;
-
 pub(crate) fn format_symbols(symbols: &[Symbol]) -> String {
     format_symbols_with_callees(symbols, None)
 }
@@ -34,13 +32,8 @@ pub(crate) fn format_symbols_with_callees(
         ));
         if let Some(cs) = callees.and_then(|c| c.get(i)) {
             if !cs.is_empty() {
-                if cs.len() > CALL_CAP {
-                    let shown: Vec<&str> = cs.iter().take(CALL_CAP).map(|s| s.as_str()).collect();
-                    out.push_str(&format!(" → {} +{} more", shown.join(", "), cs.len() - CALL_CAP));
-                } else {
-                    let shown: Vec<&str> = cs.iter().map(|s| s.as_str()).collect();
-                    out.push_str(&format!(" → {}", shown.join(", ")));
-                }
+                let shown: Vec<&str> = cs.iter().map(|s| s.as_str()).collect();
+                out.push_str(&format!(" → {}", shown.join(", ")));
             }
         }
         out.push('\n');
@@ -85,13 +78,13 @@ mod tests {
     }
 
     #[test]
-    fn callees_truncate_at_cap() {
+    fn callees_never_truncated() {
         let syms = vec![Symbol { name: "busy".into(), kind: SymbolKind::Function, start_byte: 0, end_byte: 10, start_row: 1, end_row: 1 }];
         let names: Vec<String> = (0..10).map(|i| format!("fn_{i}")).collect();
         let callees = vec![names];
         let out = format_symbols_with_callees(&syms, Some(&callees));
-        assert!(out.contains("+4 more"), "truncation missing: {out:?}");
-        assert!(out.contains("fn_0") && out.contains("fn_5"), "head names missing: {out:?}");
-        assert!(!out.contains("fn_6"), "should stop at cap: {out:?}");
+        assert!(out.contains("fn_9"), "tail missing: {out:?}");
+        assert!(!out.contains("more"), "truncation present: {out:?}");
+        assert!(out.contains("fn_0"), "head missing: {out:?}");
     }
 }
